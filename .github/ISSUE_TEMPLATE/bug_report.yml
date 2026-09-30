@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible MacClaude problem
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic examples and review attachments for private data. Report vulnerabilities through the Security tab, not here.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: MacClaude, Claude Desktop, macOS, and Mac architecture (Apple Silicon or Intel).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include expected behavior and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste the report from Copy Diagnostics if available. Do not paste raw profile files or transcripts.
+      render: text
