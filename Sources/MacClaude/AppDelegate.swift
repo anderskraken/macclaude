@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var busyID: String?
     private var sessionLocation: SessionLocation = .checking
     private var inspectionGeneration = 0
+    private var usage: [String: LocalUsageSnapshot] = [:]
+    private var rows: [AccountRowState] = []
     nonisolated static let checkedClaudeVersion = "2.9939.4"
     private var transfersSupported: Bool { installation?.version == Self.checkedClaudeVersion }
     private var sessionOwner: AccountProfile? { configuration.profiles.first { $0.id == sessionLocation.ownerID } }
@@ -81,12 +83,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
         statusItem.menu = menu
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                       app.bundleIdentifier == ClaudeInstallation.bundleIdentifier else { return }
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // An update replaces the bundle while Claude is closed.
+                    self.installation = ClaudeInstallation.find(savedPath: self.configuration.claudeApplicationPath)
                     self.refresh()
                     if name == NSWorkspace.didTerminateApplicationNotification, self.busyID == nil {
                         await self.refreshSessionLocation()
@@ -94,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             })
         }
+        reloadUsage()
         refresh()
         // Login launches remain unobtrusive; a normal launch always presents Accounts.
         let event = NSAppleEventManager.shared().currentAppleEvent
@@ -103,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        windowController?.show()
+        if windowController != nil { showAccounts() }
         return true
     }
 
@@ -113,13 +118,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busyID == nil && !runtime.isLaunching ? .terminateNow : .terminateCancel
     }
 
-    func menuWillOpen(_ menu: NSMenu) { refresh(); rebuildMenu(menu) }
+    func menuWillOpen(_ menu: NSMenu) { reloadUsage(); refresh(); rebuildMenu(menu) }
+
+    private func reloadUsage() {
+        usage = Dictionary(uniqueKeysWithValues: configuration.profiles.compactMap { profile in
+            LocalUsageReader.read(from: paths.userDataDirectory(for: profile)).map { (profile.id, $0) }
+        })
+    }
 
     private func refresh() {
-        installation = ClaudeInstallation.find(savedPath: configuration.claudeApplicationPath)
         let instances = runtime.instances()
-        let rows = configuration.profiles.map { profile in
-            let snapshot = LocalUsageReader.read(from: paths.userDataDirectory(for: profile))
+        rows = configuration.profiles.map { profile in
+            let snapshot = usage[profile.id]
             return AccountRowState(id: profile.id, name: profile.name, isDefault: profile.isDefault,
                                    isRunning: instances.contains { $0.profile.matches(profile: profile, paths: paths) },
                                    isBusy: (busyID ?? runtime.pendingProfileID) == profile.id, usageText: snapshot.map { UsagePresentation($0).text },
@@ -202,19 +212,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let title = NSMenuItem(title: "MacClaude", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
-        let instances = runtime.instances()
-        for (index, profile) in configuration.profiles.enumerated() {
-            let item = NSMenuItem(title: (busyID ?? runtime.pendingProfileID) == profile.id ? (progressText ?? profile.name) : profile.name,
+        for (index, row) in rows.enumerated() {
+            let item = NSMenuItem(title: row.isBusy ? (progressText ?? row.name) : row.name,
                                   action: #selector(openMenuAccount(_:)), keyEquivalent: index < 9 ? String(index + 1) : "")
             item.target = self
-            item.representedObject = profile.id
-            item.isEnabled = busyID == nil && !runtime.isLaunching && canOpen(profile)
-            item.state = instances.contains { $0.profile.matches(profile: profile, paths: paths) } ? .on : .off
-            item.toolTip = sessionLocation.ownerID == profile.id
-                ? "Open \(profile.name). Your sessions are already here."
-                : (blockedReason ?? "Restart Claude with this account and the shared Code sessions.")
+            item.representedObject = row.id
+            item.isEnabled = busyID == nil && !runtime.isLaunching && row.canOpen
+            item.state = row.isRunning ? .on : .off
+            item.toolTip = row.holdsSessions
+                ? "Open \(row.name). Your sessions are already here."
+                : (row.blockedReason ?? "Restart Claude with this account and the shared Code sessions.")
             menu.addItem(item)
-            if let snapshot = LocalUsageReader.read(from: paths.userDataDirectory(for: profile)) {
+            if let snapshot = usage[row.id] {
                 let usage = UsagePresentation(snapshot)
                 for line in [usage.amounts, usage.recorded] {
                     let detail = NSMenuItem(title: line, action: nil, keyEquivalent: "")
@@ -284,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .chooseClaude: chooseClaude()
         case .refresh:
             notice = nil
+            reloadUsage()
             Task { await refreshSessionLocation() }
         case .revealProfiles: revealProfileFolders()
         case .revealRecovery: reveal(root.appendingPathComponent("SharedSessions"))
@@ -345,17 +355,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     let activation = try await Task.detached {
                         let shared = SharedSessionStore(rootDirectory: sharedRoot)
+                        // Every rename rechecks that Claude is stopped. The transcript
+                        // writer scan reads every session record, so it runs once per phase.
                         let verify: @Sendable () throws -> Void = {
                             let currentVersion = try ClaudeInstallation(url: installationURL).version
                             guard currentVersion == Self.checkedClaudeVersion else {
                                 throw SharedCompatibilityError(version: currentVersion)
                             }
                             try ProcessSnapshot.verifyClaudeStopped(installationURL: installationURL)
+                        }
+                        let verifyNoWriters: @Sendable () throws -> Void = {
+                            try verify()
                             try SessionWriterGuard.check(profileDirectories: directories, configDirectory: codeConfig,
                                                          liveProcessIDs: Set(try ProcessSnapshot.read().processes.map(\.pid)))
                         }
-                        try verify()
-                        _ = try shared.recover(profileDirectories: directories, verifyStopped: verify)
+                        try verifyNoWriters()
+                        if try shared.recover(profileDirectories: directories, verifyStopped: verify) { try verifyNoWriters() }
                         return try shared.activate(profileDirectories: directories, destination: target, verifyStopped: verify)
                     }.value
                     self.notice = activation.destinationNeedsSetup
@@ -377,6 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             await refreshSessionLocation()
             busyID = nil
+            reloadUsage()
             refresh()
         }
     }
@@ -473,7 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showAccounts() {
-        refresh(); windowController.show()
+        reloadUsage(); refresh(); windowController.show()
         if busyID == nil { Task { await refreshSessionLocation() } }
     }
     private func revealProfileFolders() {

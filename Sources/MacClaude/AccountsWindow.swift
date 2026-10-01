@@ -1,6 +1,6 @@
 import AppKit
 
-struct AccountRowState: Sendable {
+struct AccountRowState: Sendable, Equatable {
     let id: String
     let name: String
     let isDefault: Bool
@@ -54,6 +54,7 @@ final class AccountsWindowController: NSWindowController {
     private let addButton = ActionButton(title: "Add Account…", symbol: "plus")
     private let sharedButton = ActionButton(title: "Shared Files", symbol: "folder")
     private let settingsButton = MenuButton(symbol: "ellipsis.circle", accessibilityLabel: "More options")
+    private var renderedCards: (accounts: [AccountRowState], isBusy: Bool)?
 
     init(onAction: @escaping (AccountsAction) -> Void) {
         self.onAction = onAction
@@ -82,22 +83,10 @@ final class AccountsWindowController: NSWindowController {
     }
 
     func render(_ state: AccountsViewState) {
-        for view in rows.arrangedSubviews {
-            rows.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        for (index, account) in state.accounts.enumerated() {
-            let row = AccountCard(account: account, index: index, isBusy: state.isBusy, onAction: onAction)
-            rows.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        }
-        if state.accounts.isEmpty {
-            let empty = NSTextField(wrappingLabelWithString: "Add an account to get started. You’ll sign in securely inside Claude.")
-            empty.textColor = .secondaryLabelColor
-            empty.alignment = .center
-            empty.font = .systemFont(ofSize: 13)
-            rows.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        // Rebuilding cards drops keyboard focus, so only rebuild when a card would change.
+        if renderedCards?.accounts != state.accounts || renderedCards?.isBusy != state.isBusy {
+            renderedCards = (state.accounts, state.isBusy)
+            renderCards(state)
         }
         if let path = state.claudePath {
             applicationLabel.stringValue = state.claudeVersion.map { "Claude \($0)" } ?? "Claude is ready"
@@ -119,7 +108,27 @@ final class AccountsWindowController: NSWindowController {
         addButton.toolTip = state.canAdd ? "Add an account (⌘N)" : "Adding accounts is paused until this Claude version is checked."
         sharedButton.isEnabled = !state.isBusy
         settingsButton.isEnabled = !state.isBusy
-        if let window { window.recalculateKeyViewLoop() }
+    }
+
+    private func renderCards(_ state: AccountsViewState) {
+        for view in rows.arrangedSubviews {
+            rows.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for (index, account) in state.accounts.enumerated() {
+            let row = AccountCard(account: account, index: index, isBusy: state.isBusy, onAction: onAction)
+            rows.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+        if state.accounts.isEmpty {
+            let empty = NSTextField(wrappingLabelWithString: "Add an account to get started. You’ll sign in securely inside Claude.")
+            empty.textColor = .secondaryLabelColor
+            empty.alignment = .center
+            empty.font = .systemFont(ofSize: 13)
+            rows.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+        window?.recalculateKeyViewLoop()
     }
 
     private func buildInterface(in window: NSWindow) {
