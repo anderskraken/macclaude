@@ -92,8 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       app.bundleIdentifier == ClaudeInstallation.bundleIdentifier else { return }
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    // An update replaces the bundle while Claude is closed.
-                    self.installation = ClaudeInstallation.find(savedPath: self.configuration.claudeApplicationPath)
+                    self.reloadInstallation()
                     self.refresh()
                     if name == NSWorkspace.didTerminateApplicationNotification, self.busyID == nil {
                         await self.refreshSessionLocation()
@@ -119,7 +118,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard busyID != nil || runtime.isLaunching else { return .terminateNow }
-        // Quitting mid-switch would abandon the transfer; finish first, then quit.
         terminateWhenIdle = true
         notice = "MacClaude will quit when this switch finishes."
         refresh()
@@ -127,6 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) { reloadUsage(); refresh(); rebuildMenu(menu) }
+
+    private func reloadInstallation() {
+        installation = ClaudeInstallation.find(savedPath: configuration.claudeApplicationPath)
+    }
 
     private func reloadUsage() {
         usage = Dictionary(uniqueKeysWithValues: configuration.profiles.compactMap { profile in
@@ -330,23 +332,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     let activation = try await Task.detached {
                         let shared = SharedSessionStore(rootDirectory: sharedRoot)
-                        // Every rename rechecks that Claude is stopped. The transcript
-                        // writer scan reads every session record, so it runs once per phase.
-                        let verify: @Sendable () throws -> Void = {
+                        let verifyStoppedBeforeRename: @Sendable () throws -> Void = {
                             let currentVersion = try ClaudeInstallation(url: installationURL).version
                             guard currentVersion == AccountAvailability.checkedClaudeVersion else {
                                 throw SharedCompatibilityError(version: currentVersion)
                             }
                             try ProcessSnapshot.verifyClaudeStopped(installationURL: installationURL)
                         }
-                        let verifyNoWriters: @Sendable () throws -> Void = {
-                            try verify()
+                        let verifyStoppedWithoutTranscriptWriters: @Sendable () throws -> Void = {
+                            try verifyStoppedBeforeRename()
                             try SessionWriterGuard.check(profileDirectories: directories, configDirectory: codeConfig,
                                                          liveProcessIDs: Set(try ProcessSnapshot.read().processes.map(\.pid)))
                         }
-                        try verifyNoWriters()
-                        if try shared.recover(profileDirectories: directories, verifyStopped: verify) { try verifyNoWriters() }
-                        return try shared.activate(profileDirectories: directories, destination: target, verifyStopped: verify)
+                        try verifyStoppedWithoutTranscriptWriters()
+                        if try shared.recover(profileDirectories: directories, verifyStopped: verifyStoppedBeforeRename) {
+                            try verifyStoppedWithoutTranscriptWriters()
+                        }
+                        return try shared.activate(profileDirectories: directories, destination: target, verifyStopped: verifyStoppedBeforeRename)
                     }.value
                     self.notice = activation.destinationNeedsSetup
                         ? "Sign in to \(profile.name) and open Code, then choose it here again to load your shared sessions."

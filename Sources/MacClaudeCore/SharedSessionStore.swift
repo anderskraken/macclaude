@@ -95,11 +95,7 @@ public struct SharedSessionStore: Sendable {
     public func canReopenWithoutTransfer(profileDirectories: [URL], destination: URL) throws -> Bool {
         guard try !hasPendingTransaction() else { return false }
         guard let active = try readActive() else {
-            // No switch has been recorded yet. The only account with history is
-            // still safe to reopen, because nothing would move.
-            let scan = try scanProfiles(profileDirectories)
-            let histories = scan.namespaces.filter { $0.hasHistory || $0.pool.hasData }
-            return histories.count == 1 && histories[0].profile == destination.standardizedFileURL
+            return try soleHistoryProfile(profileDirectories) == destination.standardizedFileURL
         }
         guard active.namespace.profile == destination.standardizedFileURL else { return false }
         let scan = try scanProfiles(profileDirectories)
@@ -232,9 +228,6 @@ public struct SharedSessionStore: Sendable {
                       target.identity == journal.destinationIdentity,
                       target.scheduleIdentity == journal.destinationSchedule else { throw SharedSessionStoreError.changed }
             } catch {
-                // Claude may have run between the interruption and this recovery.
-                // With nothing renamed yet, dropping the journal restores a clean
-                // state, and the next attempt reports the real conflict.
                 if try nothingMoved(journal, stage: stage) { try unlinkFile(journalURL) }
                 throw error
             }
@@ -690,6 +683,11 @@ public struct SharedSessionStore: Sendable {
         }
         try visit(directory, prefix: "", depth: 0)
         return result.sorted { $0.path < $1.path }
+    }
+
+    private func soleHistoryProfile(_ profileDirectories: [URL]) throws -> URL? {
+        let histories = try scanProfiles(profileDirectories).namespaces.filter { $0.hasHistory || $0.pool.hasData }
+        return histories.count == 1 ? histories[0].profile : nil
     }
 
     private func readActive() throws -> ActiveStore? {

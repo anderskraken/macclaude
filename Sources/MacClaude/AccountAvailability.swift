@@ -1,7 +1,5 @@
 import MacClaudeCore
 
-/// What the window and menu may offer, derived from the installed Claude and the
-/// last session inspection. Launches always recheck the store themselves.
 struct AccountAvailability {
     static let checkedClaudeVersion = "2.9939.4"
 
@@ -22,7 +20,6 @@ struct AccountAvailability {
         return transfersSupported || (location.ownerID == profile.id && location.canReopen)
     }
 
-    /// Shown only when the person has something to do or wait for.
     var banner: (text: String?, action: AccountNoticeAction?) {
         guard let claudeVersion else {
             return ("Claude wasn’t found.", .init(title: "Choose Claude App…", action: .chooseClaude))

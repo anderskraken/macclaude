@@ -35,9 +35,8 @@ public enum LocalUsageReader {
         // this file alone. Omit usage instead of presenting another organization's quota.
         let organizations = Set(history.samples.map(\.org))
         guard organizations.count == 1 else { return nil }
-        // A sample from the future means the clock moved back. Skip it rather than hide all usage.
-        let recorded = history.samples.filter { $0.t.isFinite && $0.t > 0 && $0.t / 1_000 <= now.timeIntervalSince1970 }
-        guard let latest = recorded.max(by: { $0.t < $1.t }),
+        let pastSamples = history.samples.filter { $0.t.isFinite && $0.t > 0 && $0.t / 1_000 <= now.timeIntervalSince1970 }
+        guard let latest = pastSamples.max(by: { $0.t < $1.t }),
               latest.u.values.allSatisfy({ $0.isFinite && (0...100).contains($0) }),
               latest.u["fh"] != nil || latest.u["sd"] != nil else { return nil }
         return LocalUsageSnapshot(

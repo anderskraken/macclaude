@@ -147,7 +147,6 @@ public struct ProfileStore: Sendable {
         descriptorOpen = false
         guard closeResult == 0 else { throw posixError() }
         guard rename(temporaryURL.path, configurationURL.path) == 0 else { throw posixError() }
-        // Recovery checks journal profiles against this list, so the rename itself must survive power loss.
         let directory = open(rootDirectory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard directory >= 0 else { throw posixError() }
         defer { close(directory) }
