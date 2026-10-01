@@ -94,15 +94,13 @@ public struct SharedSessionStore: Sendable {
     /// changed or a transaction still needs recovery. This check never writes.
     public func canReopenWithoutTransfer(profileDirectories: [URL], destination: URL) throws -> Bool {
         guard try !hasPendingTransaction() else { return false }
-        guard try kind(at: activeURL) != nil else {
+        guard let active = try readActive() else {
             // No switch has been recorded yet. The only account with history is
             // still safe to reopen, because nothing would move.
             let scan = try scanProfiles(profileDirectories)
             let histories = scan.namespaces.filter { $0.hasHistory || $0.pool.hasData }
             return histories.count == 1 && histories[0].profile == destination.standardizedFileURL
         }
-        let active: ActiveStore = try readJSON(ActiveStore.self, from: activeURL)
-        guard active.version == 1 else { throw SharedSessionStoreError.changed }
         guard active.namespace.profile == destination.standardizedFileURL else { return false }
         let scan = try scanProfiles(profileDirectories)
         guard let owner = scan.namespaces.first(where: { $0.descriptor == active.namespace }),
@@ -132,7 +130,7 @@ public struct SharedSessionStore: Sendable {
             return SharedSessionActivation(didMove: false, destinationNeedsSetup: true, backupDirectory: nil)
         }
         if source.directory == target.directory {
-            if try kind(at: activeURL) == nil {
+            if try readActive() == nil {
                 try createPrivateDirectory(stateDirectory)
                 try writeJSON(ActiveStore(version: 1, namespace: target.descriptor, identity: target.identity), to: activeURL)
             }
@@ -181,7 +179,6 @@ public struct SharedSessionStore: Sendable {
     }
 
     private func finish(_ journal: inout Journal) throws {
-        try validateJournal(journal, allowedProfiles: journal.namespaces.map(\.profile))
         try createPrivateDirectory(stateDirectory.appendingPathComponent("Transactions", isDirectory: true))
         let stage = transactionDirectory(journal.id)
         try createPrivateDirectory(stage)
@@ -392,10 +389,8 @@ public struct SharedSessionStore: Sendable {
         let histories = namespaces.filter { $0.hasHistory || $0.pool.hasData }
         guard histories.count <= 1 else { throw SharedSessionStoreError.multipleHistories }
         if let history = histories.first { return history }
-        if try kind(at: activeURL) != nil {
-            let active: ActiveStore = try readJSON(ActiveStore.self, from: activeURL)
-            guard active.version == 1,
-                  let selected = namespaces.first(where: { $0.descriptor == active.namespace }),
+        if let active = try readActive() {
+            guard let selected = namespaces.first(where: { $0.descriptor == active.namespace }),
                   selected.identity == active.identity else { throw SharedSessionStoreError.changed }
             return selected
         }
@@ -506,7 +501,7 @@ public struct SharedSessionStore: Sendable {
             let size = (attrs[.size] as? NSNumber)?.int64Value ?? Int64.max
             guard size <= Self.maximumFileBytes else { throw SharedSessionStoreError.unsafe("a Code session file is too large.") }
             bytes += size
-            guard bytes <= Self.maximumTreeBytes, count <= 100_000 else { throw SharedSessionStoreError.unsafe("the Code session folder exceeds the safety bounds.") }
+            guard bytes <= Self.maximumTreeBytes else { throw SharedSessionStoreError.unsafe("the Code session folder exceeds the safety bounds.") }
         } else {
             throw SharedSessionStoreError.unsafe("a session folder contains a symbolic link or special file.")
         }
@@ -695,6 +690,13 @@ public struct SharedSessionStore: Sendable {
         }
         try visit(directory, prefix: "", depth: 0)
         return result.sorted { $0.path < $1.path }
+    }
+
+    private func readActive() throws -> ActiveStore? {
+        guard try kind(at: activeURL) != nil else { return nil }
+        let active = try readJSON(ActiveStore.self, from: activeURL)
+        guard active.version == 1 else { throw SharedSessionStoreError.changed }
+        return active
     }
 
     private func existingBackup() throws -> URL? { try readReceipt().map { backupDirectory($0.backupID) } }

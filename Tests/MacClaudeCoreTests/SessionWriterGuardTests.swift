@@ -7,7 +7,10 @@ final class SessionWriterGuardTests: XCTestCase {
     private var root: URL!
     private var config: URL { root.appendingPathComponent("config", isDirectory: true) }
     private var registry: URL { config.appendingPathComponent("sessions", isDirectory: true) }
-    private var history: URL { root.appendingPathComponent("history", isDirectory: true) }
+    private var profile: URL { root.appendingPathComponent("profile", isDirectory: true) }
+    private var history: URL {
+        profile.appendingPathComponent("claude-code-sessions/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/cccccccc-cccc-4ccc-8ccc-cccccccccccc", isDirectory: true)
+    }
     private let current = "11111111-1111-4111-8111-111111111111"
     private let prior = "22222222-2222-4222-8222-222222222222"
     private let unrelated = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
@@ -32,7 +35,7 @@ final class SessionWriterGuardTests: XCTestCase {
         try record(["cliSessionId": current])
         try writer(unrelated, extras: ["kind": "interactive", "procStart": "Tue Sep 29 10:00:00 2026", "updatedAt": 1_800_000_000_000])
         XCTAssertNoThrow(try check())
-        XCTAssertNoThrow(try SessionWriterGuard.check(sessionDirectory: nil, configDirectory: config, liveProcessIDs: [pid]))
+        XCTAssertNoThrow(try SessionWriterGuard.check(profileDirectories: [], configDirectory: config, liveProcessIDs: [pid]))
     }
 
     func testAllHistoricalHandlesAndRewindEdgesBlock() throws {
@@ -147,6 +150,7 @@ final class SessionWriterGuardTests: XCTestCase {
         try FileManager.default.createDirectory(at: registry, withIntermediateDirectories: true)
         try writer(unrelated)
         try FileManager.default.removeItem(at: history)
+        try Data("not a directory".utf8).write(to: history)
         assertFailure(.unreadableSessionMetadata)
     }
 
@@ -251,7 +255,7 @@ final class SessionWriterGuardTests: XCTestCase {
     }
 
     private func check(live: Set<Int32>? = nil) throws {
-        try SessionWriterGuard.check(sessionDirectory: history, configDirectory: config, liveProcessIDs: live ?? [pid])
+        try SessionWriterGuard.check(profileDirectories: [profile], configDirectory: config, liveProcessIDs: live ?? [pid])
     }
 
     private func assertFailure(_ expected: SessionWriterGuardError, file: StaticString = #filePath, line: UInt = #line) {

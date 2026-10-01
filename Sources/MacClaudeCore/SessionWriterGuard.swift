@@ -34,23 +34,6 @@ public enum SessionWriterGuard {
     private static let maximumTotalBytes = 67_108_864
     private static let maximumLineageIDs = 10_000
 
-    public static func check(
-        sessionDirectory: URL?,
-        configDirectory: URL,
-        liveProcessIDs: Set<Int32>
-    ) throws {
-        var totalBytes = 0
-        let liveSessionIDs = try registeredSessions(configDirectory: configDirectory,
-                                                    liveProcessIDs: liveProcessIDs, totalBytes: &totalBytes)
-        guard !liveSessionIDs.isEmpty, let sessionDirectory else { return }
-        guard let sessionFD = try openDirectory(sessionDirectory, allowMissing: false, failure: .unreadableSessionMetadata) else {
-            throw SessionWriterGuardError.unreadableSessionMetadata
-        }
-        defer { close(sessionFD) }
-        var totalEntries = 0
-        try checkHistory(sessionFD, liveSessionIDs: liveSessionIDs, totalBytes: &totalBytes, totalEntries: &totalEntries)
-    }
-
     /// Looks in both possible owners during a journaled transfer. Missing
     /// namespaces are expected between renames; existing namespace directories
     /// must be real directories. The caller validates profile ownership and
