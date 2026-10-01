@@ -41,16 +41,14 @@ final class AccountNameDialog: NSObject, NSTextFieldDelegate {
     func controlTextDidChange(_ notification: Notification) { updateValidation(showEmpty: true) }
 
     private func updateValidation(showEmpty: Bool) {
-        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let message: String
-        if value.isEmpty { message = showEmpty ? "Enter an account name." : "" }
-        else if value.count > 60 { message = "Use 60 characters or fewer." }
-        else if value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) {
-            message = "Remove line breaks or control characters."
-        } else { message = "" }
-        validation.stringValue = message
-        validation.isHidden = message.isEmpty
-        alert.buttons[0].isEnabled = (try? ProfileStore.validatedName(field.stringValue)) != nil
+        var message = ""
+        do { _ = try ProfileStore.validatedName(field.stringValue) }
+        catch ProfileStoreError.invalidConfiguration(let reason) { message = reason.prefix(1).uppercased() + reason.dropFirst() }
+        catch { message = error.localizedDescription }
+        let isEmpty = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        validation.stringValue = isEmpty && !showEmpty ? "" : message
+        validation.isHidden = validation.stringValue.isEmpty
+        alert.buttons[0].isEnabled = message.isEmpty
         alert.layout()
     }
 }

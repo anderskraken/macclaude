@@ -20,11 +20,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var inspectionGeneration = 0
     private var usage: [String: LocalUsageSnapshot] = [:]
     private var rows: [AccountRowState] = []
-    nonisolated static let checkedClaudeVersion = "2.9939.4"
-    private var transfersSupported: Bool { installation?.version == Self.checkedClaudeVersion }
-    private var sessionOwner: AccountProfile? { configuration.profiles.first { $0.id == sessionLocation.ownerID } }
+    private var terminateWhenIdle = false
+    private var availability: AccountAvailability {
+        AccountAvailability(claudeVersion: installation?.version, location: sessionLocation, profiles: configuration.profiles)
+    }
+    private var transfersSupported: Bool { availability.transfersSupported }
 
     private var observers: [NSObjectProtocol] = []
+    private var sharedRoot: URL { root.appendingPathComponent("SharedSessions", isDirectory: true) }
 
     init(root: URL) {
         self.root = root
@@ -115,7 +118,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        busyID == nil && !runtime.isLaunching ? .terminateNow : .terminateCancel
+        guard busyID != nil || runtime.isLaunching else { return .terminateNow }
+        // Quitting mid-switch would abandon the transfer; finish first, then quit.
+        terminateWhenIdle = true
+        notice = "MacClaude will quit when this switch finishes."
+        refresh()
+        return .terminateLater
     }
 
     func menuWillOpen(_ menu: NSMenu) { reloadUsage(); refresh(); rebuildMenu(menu) }
@@ -127,6 +135,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refresh() {
+        if terminateWhenIdle, busyID == nil, !runtime.isLaunching {
+            terminateWhenIdle = false
+            NSApp.reply(toApplicationShouldTerminate: true)
+            return
+        }
+        let availability = availability
         let instances = runtime.instances()
         rows = configuration.profiles.map { profile in
             let snapshot = usage[profile.id]
@@ -134,10 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                    isRunning: instances.contains { $0.profile.matches(profile: profile, paths: paths) },
                                    isBusy: (busyID ?? runtime.pendingProfileID) == profile.id, usageText: snapshot.map { UsagePresentation($0).text },
                                    holdsSessions: sessionLocation.ownerID == profile.id,
-                                   canOpen: canOpen(profile), blockedReason: blockedReason,
+                                   canOpen: availability.canOpen(profile), blockedReason: availability.blockedReason,
                                    usageIsStale: snapshot?.isStale() ?? false)
         }
-        let banner = statusBanner
+        let banner = availability.banner
         let message = progressText ?? notice ?? banner.text
         let action = progressText == nil && notice == nil ? banner.action : nil
         windowController?.render(AccountsViewState(accounts: rows, claudePath: installation?.url.path,
@@ -145,51 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                    noticeAction: action, canAdd: transfersSupported))
     }
 
-    private var blockedReason: String? {
-        installation == nil ? "Choose the Claude app first." :
-            (!transfersSupported ? "Account switching is paused until this Claude version is checked." : nil)
-    }
-
-    private func canOpen(_ profile: AccountProfile) -> Bool {
-        guard installation != nil else { return false }
-        if transfersSupported { return true }
-        return sessionLocation.ownerID == profile.id && sessionLocation.canReopen
-    }
-
-    private var statusBanner: (text: String?, action: AccountNoticeAction?) {
-        guard let installation else {
-            return ("Claude wasn’t found. Choose the installed Claude app.", .init(title: "Choose Claude App…", action: .chooseClaude))
-        }
-        switch sessionLocation {
-        case .checking: return ("Checking where your shared sessions are…", nil)
-        case .recoveryRequired:
-            return ("A session transfer needs recovery. Keep Claude closed until recovery completes." +
-                    (transfersSupported ? " Select an account to retry recovery." : " Recovery is paused until this Claude version is checked."),
-                    .init(title: "Show Recovery Folder", action: .revealRecovery))
-        case let .unavailable(error):
-            return ("Couldn’t verify your session location. " + error.localizedDescription, .init(title: "Show Profile Folders", action: .revealProfiles))
-        case .ready:
-            guard let owner = sessionOwner else {
-                return (transfersSupported ? nil : "Claude \(installation.version) hasn’t been checked for account switching. No shared session owner has been recorded yet.", nil)
-            }
-            if !transfersSupported {
-                let detail = sessionLocation.canReopen
-                    ? "Open \(owner.name) to continue without moving sessions."
-                    : "MacClaude needs to verify the recorded session directory before reopening it."
-                let action: AccountNoticeAction? = sessionLocation.canReopen
-                    ? .init(title: "Open \(owner.name)", action: .open(owner.id)) : nil
-                return ("Your sessions are in \(owner.name).\nClaude \(installation.version) hasn’t been checked for account switching. \(detail)", action)
-            }
-            return ("Your shared sessions are in \(owner.name).", nil)
-        }
-    }
-
     private func refreshSessionLocation() async {
         inspectionGeneration += 1
         let generation = inspectionGeneration
         let profiles = configuration.profiles
         let paths = paths
-        let sharedRoot = root.appendingPathComponent("SharedSessions")
+        let sharedRoot = sharedRoot
         let location = await Task.detached(priority: .utility) {
             SessionLocation.read(root: sharedRoot, profiles: profiles, paths: paths)
         }.value
@@ -209,11 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMenu(_ menu: NSMenu) {
         menu.removeAllItems()
-        let title = NSMenuItem(title: "MacClaude", action: nil, keyEquivalent: "")
-        title.isEnabled = false
-        menu.addItem(title)
         for (index, row) in rows.enumerated() {
-            let item = NSMenuItem(title: row.isBusy ? (progressText ?? row.name) : row.name,
+            let item = NSMenuItem(title: row.isBusy ? "\(row.name) (\((runtime.phase ?? .checkingSessions).title(account: row.name)))" : row.name,
                                   action: #selector(openMenuAccount(_:)), keyEquivalent: index < 9 ? String(index + 1) : "")
             item.target = self
             item.representedObject = row.id
@@ -240,16 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         addMenuItem(menu, "Add Account…", #selector(addAccount), "n", enabled: busyID == nil && !runtime.isLaunching && transfersSupported)
         addMenuItem(menu, "Manage Accounts…", #selector(showAccounts), ",")
-        addMenuItem(menu, "Open Shared Code Files", #selector(revealShared), "")
         menu.addItem(.separator())
         let login = addMenuItem(menu, "Launch at Login", #selector(toggleLogin), "")
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         login.isEnabled = Bundle.main.bundleURL.pathExtension == "app"
-        addMenuItem(menu, "Copy Diagnostics", #selector(copyDiagnostics), "")
-        addMenuItem(menu, "How MacClaude Works", #selector(showHelp), "")
         addMenuItem(menu, "About MacClaude", #selector(showAbout), "")
         menu.addItem(.separator())
-        addMenuItem(menu, "Quit MacClaude", #selector(quit), "q", enabled: busyID == nil && !runtime.isLaunching)
+        addMenuItem(menu, "Quit MacClaude", #selector(quit), "q")
     }
 
     @discardableResult private func addMenuItem(_ menu: NSMenu, _ title: String, _ action: Selector, _ key: String, enabled: Bool = true) -> NSMenuItem {
@@ -272,11 +241,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(appItem)
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         let edit = NSMenu(title: "Edit")
-        for (title, action, key) in [("Undo", "undo:", "z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
             edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
         }
         editItem.submenu = edit
         main.addItem(editItem)
+        let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
         NSApp.mainMenu = main
     }
 
@@ -296,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             reloadUsage()
             Task { await refreshSessionLocation() }
         case .revealProfiles: revealProfileFolders()
-        case .revealRecovery: reveal(root.appendingPathComponent("SharedSessions"))
+        case .revealRecovery: reveal(sharedRoot)
         case .help: showHelp()
         case .copyDiagnostics: copyDiagnostics()
         }
@@ -318,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 let directories = configuration.profiles.map { paths.userDataDirectory(for: $0) }
                 let target = paths.userDataDirectory(for: profile)
-                let sharedRoot = root.appendingPathComponent("SharedSessions", isDirectory: true)
+                let sharedRoot = sharedRoot
                 let profiles = configuration.profiles
                 let profilePaths = paths
                 let initial = await Task.detached {
@@ -328,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 sessionLocation = initial
                 if case let .unavailable(error) = initial { throw error }
                 let reuse = initial.ownerID == profile.id
-                if installation.version != Self.checkedClaudeVersion {
+                if installation.version != AccountAvailability.checkedClaudeVersion {
                     let canReopen = try await Task.detached {
                         try SharedSessionStore(rootDirectory: sharedRoot)
                             .canReopenWithoutTransfer(profileDirectories: directories, destination: target)
@@ -339,7 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                        installation: installation, reuseRunning: reuse) {
                     let codeConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
                     let installationURL = installation.url
-                    if installation.version != Self.checkedClaudeVersion {
+                    if installation.version != AccountAvailability.checkedClaudeVersion {
                         // After a reboot/update, reopen the existing owner without
                         // calling either recovery or activation. Recheck ownership
                         // after shutdown; an earlier inspection is not authority to move.
@@ -359,7 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         // writer scan reads every session record, so it runs once per phase.
                         let verify: @Sendable () throws -> Void = {
                             let currentVersion = try ClaudeInstallation(url: installationURL).version
-                            guard currentVersion == Self.checkedClaudeVersion else {
+                            guard currentVersion == AccountAvailability.checkedClaudeVersion else {
                                 throw SharedCompatibilityError(version: currentVersion)
                             }
                             try ProcessSnapshot.verifyClaudeStopped(installationURL: installationURL)
@@ -377,7 +352,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         ? "Sign in to \(profile.name) and open Code, then choose it here again to load your shared sessions."
                         : nil
                 }
-                if installation.version != Self.checkedClaudeVersion { self.notice = nil }
                 if configuration.lastOpenedProfileID != id {
                     var next = configuration
                     next.lastOpenedProfileID = id
@@ -389,6 +363,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } catch {
                 await refreshSessionLocation()
                 presentOpeningError(error, profile: profile, startingOwnerID: startingOwnerID)
+                busyID = nil
+                reloadUsage()
+                refresh()
+                return
             }
             await refreshSessionLocation()
             busyID = nil
@@ -399,9 +377,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func addAccount() {
         guard busyID == nil, !runtime.isLaunching, transfersSupported else { return }
-        guard let name = askName(title: "Add Account", message: "Name this account, then sign in once in Claude. Adding it quits the current Claude account. Sign in and open Code, then choose the new account here again to load your shared sessions.", value: "", button: "Add & Open") else { return }
+        guard let name = askName(title: "Add Account", message: "Claude will quit and open a new sign-in window. Sign in, open Code, then choose this account here again.", value: "", button: "Add & Open") else { return }
         do {
-            let name = try ProfileStore.validatedName(name)
             let profile = AccountProfile(id: UUID().uuidString.lowercased(), name: name, createdAt: Date())
             var next = configuration
             next.profiles.append(profile)
@@ -414,10 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func renameAccount(_ id: String) {
         guard busyID == nil, let index = configuration.profiles.firstIndex(where: { $0.id == id }) else { return }
-        guard let name = askName(title: "Rename Account", message: "This changes the name in MacClaude. Your Claude sign-in and files stay in place.", value: configuration.profiles[index].name, button: "Save") else { return }
+        guard let name = askName(title: "Rename Account", message: "Only the name in MacClaude changes.", value: configuration.profiles[index].name, button: "Save") else { return }
         do {
             var next = configuration
-            next.profiles[index].name = try ProfileStore.validatedName(name)
+            next.profiles[index].name = name
             try store.save(next)
             configuration = next
             refresh()
@@ -433,19 +410,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // A closed profile may still own the one real session store. Keep it
         // reachable until another profile has taken ownership.
-        do {
-            let shared = SharedSessionStore(rootDirectory: root.appendingPathComponent("SharedSessions"))
-            guard try !shared.hasPendingTransaction() else { throw SharedSessionStoreError.recoveryRequired }
-            let inspection = try shared.inspect(profileDirectories: configuration.profiles.map { paths.userDataDirectory(for: $0) })
-            guard inspection.activeProfileDirectory != paths.userDataDirectory(for: profile) else {
-                notice = "Switch to another account before removing \(profile.name); it currently holds your shared sessions."
-                refresh()
-                return
-            }
-        } catch { present(error, title: "Couldn’t check shared sessions"); return }
+        guard case .ready = sessionLocation, sessionLocation.ownerID != profile.id else {
+            notice = sessionLocation.ownerID == profile.id
+                ? "Switch to another account before removing \(profile.name). It has your sessions."
+                : "MacClaude can’t confirm where your sessions are, so it won’t remove an account yet."
+            refresh()
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Remove \(profile.name) from MacClaude?"
-        alert.informativeText = "Its sign-in and files will remain on this Mac. Only the entry in this account list is removed."
+        alert.informativeText = "Its sign-in and files stay on this Mac."
         alert.addButton(withTitle: "Remove from List")
         alert.addButton(withTitle: "Cancel")
         alert.buttons[0].keyEquivalent = ""
@@ -516,23 +490,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // During a transfer, use the last settled snapshot and report the stage;
             // an inspection half way through a rename would be misleading.
             if busyID == nil && !runtime.isLaunching { await refreshSessionLocation() }
-            let instances = runtime.instances()
-            let runningIDs = Set(configuration.profiles.filter { profile in
-                instances.contains { $0.profile.matches(profile: profile, paths: paths) }
-            }.map(\.id))
-            let unidentified = instances.filter { instance in
-                !configuration.profiles.contains { instance.profile.matches(profile: $0, paths: paths) }
-            }.count
             let report = DiagnosticsReport(
-                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-                build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
-                claudeVersion: installation?.version, profiles: configuration.profiles,
-                runningIDs: runningIDs, unidentifiedProcesses: unidentified,
+                claudeVersion: installation?.version, profiles: configuration.profiles, instances: runtime.instances(), paths: paths,
                 location: busyID != nil || runtime.isLaunching ? .checking : sessionLocation,
-                transfersSupported: transfersSupported, phase: runtime.phase ?? (busyID == nil ? nil : .checkingSessions),
+                phase: runtime.phase ?? (busyID == nil ? nil : .checkingSessions),
                 pendingID: runtime.pendingProfileID, launchTimedOut: runtime.launchHasTimedOut, lastFailure: lastFailure)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(report.text, forType: .string)
+            notice = "Diagnostics copied. They contain no names, paths or conversations."
+            refresh()
             NSAccessibility.post(element: windowController.window ?? NSApp as Any,
                                  notification: .announcementRequested,
                                  userInfo: [.announcement: "Diagnostics copied", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
@@ -541,9 +507,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showHelp() {
         let alert = NSAlert()
-        let originalName = configuration.profiles.first(where: \.isDefault)?.name ?? "Personal"
-        alert.messageText = "One workspace, several accounts"
-        alert.informativeText = "\(originalName) uses your existing Claude sign-in. Each added account keeps its own login. Choose an account here or in the menu bar.\n\nSwitching gracefully quits Claude, moves the same Code session folder to the selected account, and reopens Claude. One account runs at a time. Finish running work before switching; MacClaude never force-quits Claude.\n\nYour Code session history, project files, local skills, instructions, and memory stay shared. There is no import or background synchronization. Account schedules stay with their original login. Cloud chats, Chat memory, and Cowork stay with each account.\n\nA private backup is saved before the first move. If a move is interrupted, the next switch completes recovery before opening Claude. Always switch through MacClaude; starting another account directly can create a separate history.\n\nTransfers support Claude 2.9939.4. After an update, you can reopen the account holding your sessions. Transferring them to another account requires a compatibility check. MacClaude never reads your passwords or authentication tokens."
+        alert.messageText = "How MacClaude works"
+        alert.informativeText = "Each account keeps its own Claude login. Switching quits Claude, moves your Code sessions to the chosen account, and opens Claude again. Only one account runs at a time.\n\nAlways switch here. Opening another account directly starts a separate history that MacClaude won’t merge."
         alert.addButton(withTitle: "Done")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -554,14 +519,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .applicationName: "MacClaude",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
-            .credits: NSAttributedString(string: "Account Switcher\nA small native companion for Claude on Mac.\n\nIndependent software. Not affiliated with Anthropic.")
+            .credits: NSAttributedString(string: "Not affiliated with Anthropic.")
         ])
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func presentOpeningError(_ error: Error, profile: AccountProfile, startingOwnerID: String?) {
-        lastFailure = DiagnosticFailure(error)
         if case RuntimeError.launchTimedOut = error {
+            lastFailure = DiagnosticFailure(error)
             // LaunchServices cannot cancel its request. Keep progress in the window;
             // the runtime's completion callback clears it when the request resolves.
             notice = nil
@@ -570,22 +535,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if error is SharedCompatibilityError, sessionLocation.canReopen,
            startingOwnerID == sessionLocation.ownerID {
+            lastFailure = DiagnosticFailure(error)
             notice = nil
             windowController.show()
             return
         }
         let outcome = sessionLocation.outcome(startingOwnerID: startingOwnerID, profiles: configuration.profiles)
-        var action: (String, () -> Void)?
-        if case SharedSessionStoreError.multipleHistories = error {
-            action = ("Show Profile Folders", { [weak self] in self?.revealProfileFolders() })
-        } else if case SharedSessionStoreError.conflictingWorktreePools = error {
-            action = ("Show Profile Folders", { [weak self] in self?.revealProfileFolders() })
-        } else if case .recoveryRequired = sessionLocation {
-            action = ("Show Recovery Folder", { [weak self] in
-                guard let self else { return }
-                self.reveal(self.root.appendingPathComponent("SharedSessions"))
-            })
-        } else if let running = runtime.instances().first(where: { $0.profile != .unknown })?.application {
+        var action = storageAction(for: error)
+        if action == nil, case .recoveryRequired = sessionLocation {
+            action = storageAction(for: SharedSessionStoreError.recoveryRequired)
+        } else if action == nil, let running = runtime.instances().first(where: { $0.profile != .unknown })?.application {
             // Focus only an existing process. This action never launches or switches.
             action = ("Show Claude", { running.unhide(); running.activate(options: [.activateAllWindows]) })
         }
@@ -597,7 +556,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastFailure = DiagnosticFailure(error)
         let action = action ?? storageAction(for: error)
         let message = [error.localizedDescription, detail].filter { !$0.isEmpty }.joined(separator: "\n\n")
-        notice = message
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -616,18 +574,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .recoveryRequired:
             return ("Show Recovery Folder", { [weak self] in
                 guard let self else { return }
-                self.reveal(self.root.appendingPathComponent("SharedSessions"))
+                self.reveal(self.sharedRoot)
             })
         default: return nil
         }
     }
 
-    @objc private func quit() { if busyID == nil && !runtime.isLaunching { NSApp.terminate(nil) } }
+    @objc private func quit() { NSApp.terminate(nil) }
 }
 
 struct SharedCompatibilityError: LocalizedError {
     let version: String
     var errorDescription: String? {
-        "Claude \(version) needs a compatibility check before MacClaude can move your session folder. Transfers have been checked with Claude 2.9939.4."
+        "Switching isn’t available on Claude \(version) yet. MacClaude has been tested with Claude \(AccountAvailability.checkedClaudeVersion)."
     }
 }
