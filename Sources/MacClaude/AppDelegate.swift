@@ -118,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard busyID != nil || runtime.isLaunching else { return .terminateNow }
+        // Deferring from inside an alert's modal loop would never get its reply.
+        guard NSApp.modalWindow == nil else { return .terminateCancel }
         terminateWhenIdle = true
         notice = "MacClaude will quit when this switch finishes."
         refresh()
@@ -332,23 +334,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     let activation = try await Task.detached {
                         let shared = SharedSessionStore(rootDirectory: sharedRoot)
-                        let verifyStoppedBeforeRename: @Sendable () throws -> Void = {
+                        let verify: @Sendable () throws -> Void = {
                             let currentVersion = try ClaudeInstallation(url: installationURL).version
                             guard currentVersion == AccountAvailability.checkedClaudeVersion else {
                                 throw SharedCompatibilityError(version: currentVersion)
                             }
                             try ProcessSnapshot.verifyClaudeStopped(installationURL: installationURL)
-                        }
-                        let verifyStoppedWithoutTranscriptWriters: @Sendable () throws -> Void = {
-                            try verifyStoppedBeforeRename()
                             try SessionWriterGuard.check(profileDirectories: directories, configDirectory: codeConfig,
                                                          liveProcessIDs: Set(try ProcessSnapshot.read().processes.map(\.pid)))
                         }
-                        try verifyStoppedWithoutTranscriptWriters()
-                        if try shared.recover(profileDirectories: directories, verifyStopped: verifyStoppedBeforeRename) {
-                            try verifyStoppedWithoutTranscriptWriters()
-                        }
-                        return try shared.activate(profileDirectories: directories, destination: target, verifyStopped: verifyStoppedBeforeRename)
+                        try verify()
+                        _ = try shared.recover(profileDirectories: directories, verifyStopped: verify)
+                        return try shared.activate(profileDirectories: directories, destination: target, verifyStopped: verify)
                     }.value
                     self.notice = activation.destinationNeedsSetup
                         ? "Sign in to \(profile.name) and open Code, then choose it here again to load your shared sessions."
@@ -412,13 +409,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // A closed profile may still own the one real session store. Keep it
         // reachable until another profile has taken ownership.
-        guard case .ready = sessionLocation, sessionLocation.ownerID != profile.id else {
-            notice = sessionLocation.ownerID == profile.id
-                ? "Switch to another account before removing \(profile.name). It has your sessions."
-                : "MacClaude can’t confirm where your sessions are, so it won’t remove an account yet."
-            refresh()
-            return
-        }
+        do {
+            let shared = SharedSessionStore(rootDirectory: sharedRoot)
+            let inspection = try shared.inspect(profileDirectories: configuration.profiles.map { paths.userDataDirectory(for: $0) })
+            guard inspection.activeProfileDirectory != paths.userDataDirectory(for: profile) else {
+                notice = "Switch to another account before removing \(profile.name). It has your sessions."
+                refresh()
+                return
+            }
+        } catch { present(error, title: "Couldn’t check where your sessions are"); return }
         let alert = NSAlert()
         alert.messageText = "Remove \(profile.name) from MacClaude?"
         alert.informativeText = "Its sign-in and files stay on this Mac."
