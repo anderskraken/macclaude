@@ -34,6 +34,16 @@ final class LocalUsageTests: XCTestCase {
         XCTAssertEqual(snapshot.weeklyPercent, 100)
     }
 
+    func testFutureSampleFromClockSkewDoesNotHideRecordedUsage() throws {
+        try write(["version": 2, "samples": [
+            ["t": 1_800_000_500_000, "org": "one", "u": ["fh": 99]],
+            ["t": 1_799_999_990_000, "org": "one", "u": ["fh": 40, "sd": 10]]
+        ]])
+        let snapshot = try XCTUnwrap(LocalUsageReader.read(from: directory, now: now))
+        XCTAssertEqual(snapshot.sessionPercent, 40)
+        XCTAssertEqual(snapshot.weeklyPercent, 10)
+    }
+
     func testMixedOrganizationsOmitUsageRatherThanGuessActiveAccount() throws {
         try write(["version": 2, "samples": [
             ["t": 1_799_999_990_000, "org": "one", "u": ["fh": 12]],
