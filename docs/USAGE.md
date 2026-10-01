@@ -1,82 +1,79 @@
-# MacClaude — Account Switcher
+# Using MacClaude
 
-A tiny native Mac menu bar app for opening and switching between Claude Desktop accounts. Written in Swift 6 and AppKit. No dependencies, web views, telemetry, network client, or background polling.
+## Set up
 
-**Preview · macOS 14+ · Apple Silicon · Claude Desktop 2.9939.4**
+Download the ZIP from the [release page](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5), unzip it, and move **MacClaude.app** to Applications before you open it or turn on Launch at Login.
 
-## Try it
+1. Your existing Claude login appears as the first account, named **Personal**. You can rename it.
+2. Choose **Add Account…** and enter a name. Claude quits and opens a new sign-in window. Sign in and open the Code tab.
+3. Choose the new account in MacClaude again. This moves your Code sessions into it.
 
-Download the ZIP from the [release page](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5), unzip it and move **MacClaude.app** to Applications before opening it or enabling Launch at Login.
+After that, choose an account in the menu bar or click **Switch** in the Accounts window. A checkmark in the menu and a green dot in the window mark the account Claude has open. **Sessions here** marks the account that holds your session history, even while Claude is closed. That account shows **Open**, and the others show **Switch**.
 
-1. **Personal** uses your existing Claude profile. You can rename this label.
-2. Choose **Add Account…**, enter a name, sign in in the new Claude window, and open its **Code** tab.
-3. After the first sign-in, select the new account again to load the shared Code history.
-4. Choose an account in the menu bar, or use **Switch** in the Accounts window. Switching quits Claude gracefully, moves the same session folder, and opens the selected login. The running account has a checkmark and green dot. **Sessions here** separately identifies the account holding the shared history, even when it is closed. Use **Open** for that account; **Switch** transfers the shared sessions to another account.
+Closing the Accounts window leaves the menu bar item running. Quitting MacClaude leaves Claude running. If you quit during a switch, MacClaude finishes the switch first and then quits.
 
-Closing MacClaude's Accounts window leaves its menu bar item available. Quitting MacClaude leaves Claude running. Each account signs in directly with Claude; MacClaude does not read credentials.
+## What follows you between accounts
 
-The published Apple Silicon app is Developer ID signed by Snega AS and notarized by Apple. Local builds remain ad-hoc signed unless a signing identity is supplied.
+Your repositories and documents are ordinary files and stay where they are. Every account uses the same Claude Code configuration folder, usually `~/.claude`, so skills, instructions, memory, agents and plugins are shared. MacClaude does not set `CLAUDE_CONFIG_DIR` or change your environment.
 
-## What follows you
+A switch moves the Code session folder and the worktree list to the new account. Nothing is copied or merged. Each account keeps its own scheduled tasks, cloud chats, Chat memory, Projects, Cowork sessions and Desktop settings.
 
-Your repositories and documents are ordinary shared files. The accounts also use the normal Claude Code configuration directory, typically `~/.claude`, so local Code skills, instructions, memory, agents, plugins, and transcripts remain available where Claude uses those locations. MacClaude does not set `CLAUDE_CONFIG_DIR` or change your environment. Existing custom configuration or organization policy can affect this behavior.
+Only one account runs at a time. Finish running work before you switch. MacClaude never force-quits Claude, and it won't move sessions while a Code session is still writing. Always switch through MacClaude. If you open another profile yourself, Claude starts a separate history there, and MacClaude won't merge the two.
 
-Local Code session records move as one real directory, retaining the native sidebar entries and their existing transcript references. The worktree registry moves with them so checkout paths and leases follow the sessions. Routine switching does not copy records, import sessions, or synchronize histories. Account schedules remain at their original account paths. Cloud chats, Chat memory, cloud Projects, Cowork sessions, and Desktop preferences/connectors stay with their account/profile.
+## Claude versions
 
-One Claude account runs at a time. Finish active work before switching. MacClaude will not force-quit a process or move history while a known session writer remains alive. Always switch through MacClaude: starting another profile directly can create a separate history, which this version refuses to merge automatically.
+Switching and adding accounts work only with Claude Desktop 2.9939.4. On other versions, MacClaude still opens the account that holds your sessions, because that moves nothing. The Accounts window shows an **Open** button for it.
 
-## Compatibility
+MacClaude also refuses to switch when it finds a pending session import, more than one account or organization folder in a profile, two accounts with their own history, an unexpected file, or folders on different disks. The alert says which one it found. See [architecture](ARCHITECTURE.md) and [testing](TESTING.md) for details.
 
-Shared-store switching supports **Claude Desktop 2.9939.4**. On newer versions, you can reopen the account already holding the shared store after MacClaude verifies its identity. Moving sessions to another account still requires a compatibility check. Pending transcript imports, ambiguous account/org namespaces, independently populated histories, unexpected files and cross-volume moves stop with an explanation. See [architecture](ARCHITECTURE.md) and [validation](TESTING.md).
+### Reasoning after a switch
 
-### Session history and reasoning continuity
-
-MacClaude shares local session history and project state. It cannot guarantee that a model reuses identical reasoning after an account or model change. Account and model changes can affect continuation; their effect on Desktop Code reasoning continuity remains unverified.
-
-MacClaude preserves stored session contents and leaves request construction to Claude. It does not rewrite transcripts, strip thinking blocks or change API settings. Sidebar visibility and a successful continuation are useful checks, but do not prove earlier thinking was retained.
+MacClaude moves stored sessions as they are and leaves the requests to Claude. It doesn't rewrite transcripts, strip thinking blocks or change API settings. A continued session can still behave differently after an account or model change, and nobody has measured how much. A session showing up in the sidebar doesn't prove its earlier reasoning carried over.
 
 ## After a reboot or Claude update
 
-macOS may reopen Claude’s original profile instead of your last MacClaude account. An empty Code sidebar there does not mean the shared history was deleted: it can still be in the other account’s profile. Quit Claude and open the last-used account through MacClaude.
+macOS may reopen Claude on your original account. The Code sidebar there can look empty because your sessions are in another account's profile. Quit Claude and open the right account from MacClaude.
 
-MacClaude can reopen the recorded session owner on a newer Claude version without moving any session files. An interrupted transfer or changed directory identity still stops the operation. Do not create replacement sessions, copy histories together, or restore yesterday’s initial backup over today’s work to fix an empty list. Use the diagnostics below to identify which account holds the store.
+Don't create new sessions to replace the missing ones, copy histories together, or restore an old backup over today's work. Copy Diagnostics tells you which account holds the sessions.
 
-## Alerts and recovery actions
+## Alerts
 
-After an unchecked Claude update, the Accounts window names the account holding your sessions and offers **Open <account>**. Transfers and Add Account are disabled until compatibility is checked. The menu bar uses the same restrictions.
+When something goes wrong, the alert explains it and may offer one action: **Show Claude**, **Show Profile Folders**, **Show Recovery Folder** or **Choose Claude App…**. None of these retries the switch.
 
-Error alerts use **Close** to dismiss them, with specific actions when available: **Show Claude**, **Show Profile Folders**, **Show Recovery Folder**, or **Choose Claude App…**. These actions do not retry a session transfer. Startup failures that exit the app say **Quit** or **Show Folder & Quit**.
+While a switch runs, the window shows the current step, from checking sessions to opening the chosen account. If macOS is slow to open Claude, the window says so and keeps other launches blocked until Claude is up. There is no Cancel button, because macOS can't cancel a launch it has started.
 
-The status shows the actual stage: checking sessions, closing Claude, preparing sessions, opening the chosen account, and checking its profile. A delayed macOS launch explains that it is taking longer than expected and keeps additional launches blocked through profile verification. Late launch failures remain visible. There is no Cancel button because MacClaude cannot cancel that pending request. Invalid account names are explained inside the naming dialog; Save stays disabled until corrected. **Remove from List / Cancel** only affects the account list, and Cancel is the default.
+Removing an account asks for confirmation, and **Cancel** is the default.
 
 ## Files and recovery
 
 | Location | Purpose |
 | --- | --- |
-| `~/Library/Application Support/MacClaude/config.json` | Account list and app preference |
-| `~/Library/Application Support/MacClaude/Profiles/<id>/` | Additional Claude profile |
-| `~/Library/Application Support/Claude/` | Existing Claude profile; kept in place |
-| `~/.claude/` | Usual shared Claude Code files; not modified by MacClaude |
-| `~/Library/Application Support/MacClaude/SharedSessions/` | Initial backup, active-store identity, and any interrupted-switch journal |
+| `~/Library/Application Support/MacClaude/config.json` | Account list and preferences |
+| `~/Library/Application Support/MacClaude/Profiles/<id>/` | Claude profile for each added account |
+| `~/Library/Application Support/Claude/` | Your original Claude profile, left in place |
+| `~/.claude/` | Shared Claude Code files, not touched by MacClaude |
+| `~/Library/Application Support/MacClaude/SharedSessions/` | First-switch backup, the current session owner, and any interrupted-switch journal |
 
-Removing an account removes only its list entry. Its profile folder and login are retained. The original profile and the profile holding the shared session store cannot be removed; switch away first. Back up all Claude profile directories and the MacClaude directory together. The shared store lives inside whichever account was last active, under `claude-code-sessions/<account>/<org>`.
+Removing an account only removes it from the list. Its profile folder and login stay on disk. You can't remove the original account or the one that holds your sessions; switch away first. The sessions live inside whichever account was last active, under `claude-code-sessions/<account>/<org>`.
 
-If MacClaude reports an interrupted switch, quit Claude and select the desired account again. Recovery uses recorded directory/file identities and refuses unexpected replacements. Initial backups are retained under `SharedSessions/Backups`, with a namespace manifest for manual restoration. Do not delete a recovery journal or restore an old backup over newer sessions while Claude is running.
+Back up the Claude profile folders and the MacClaude folder together. The first-switch backup in `SharedSessions/Backups` holds session metadata, schedules and worktree lists, with a manifest for restoring by hand. It does not include transcripts or repositories.
 
-If browser sign-in opens the wrong Claude instance, finish your work, quit the other Claude instances, and retry. macOS protocol callbacks are not routed by MacClaude. For Claude updates, finish your work and quit all Claude instances, allow Claude to update, then reopen your accounts from MacClaude. MacClaude does not modify or disable Claude's updater.
+If a switch is interrupted, quit Claude and choose an account again. MacClaude finishes the switch first. If the folders changed in a way it can't verify, it stops. If nothing had moved yet, it discards the unfinished switch and tells you what it found. Don't delete the recovery journal or restore an old backup while Claude is running.
+
+If browser sign-in opens the wrong Claude window, finish your work, quit the other Claude windows and try again. MacClaude doesn't route sign-in callbacks. To update Claude, quit every Claude window, let Claude update, then reopen your account from MacClaude. MacClaude doesn't touch Claude's updater.
 
 ## Usage and diagnostics
 
-Accounts and the menu bar show recorded usage as **5h: 20% used · Week: 40% used**, followed by the measurement’s age. Readings older than 15 minutes are marked **stale** and dimmed. These are Claude’s last local measurements, not live quota checks or reset predictions. Missing or ambiguous readings are omitted. Opening the menu or refreshing Accounts reads the local file; there is no background polling.
+Each account shows usage as **5h: 20% used · Week: 40% used**, with how long ago Claude recorded it. Readings older than 15 minutes are dimmed and marked **stale**. These are Claude's last local readings, not live quota checks. MacClaude reads the file when you open the menu or the window, not in the background.
 
-Choose **Copy Diagnostics** in the menu bar or Accounts’ **More options** menu. It copies app versions, the running account, session holder, transfer compatibility, current switching stage, recovery status and the last failure code. Account numbers match their order in the Accounts window. Names, private paths, credentials and conversation contents are excluded; nothing is uploaded. A report copied during a switch reports the session location as checking.
+**Copy Diagnostics** is in the Accounts window's **More options** menu. It copies app and Claude versions, which account is running, which holds the sessions, whether switching is available, the current step, recovery status and the last error code. Accounts appear as numbers in window order. The report has no names, paths, credentials or conversations, and nothing is uploaded.
 
-The same redacted read-only report is available from the command line (the separate process cannot report the running MacClaude instance’s progress or last error):
+You can get the same report from the command line. It can't see the running app's progress or last error:
 
 ```sh
 /Applications/MacClaude.app/Contents/MacOS/MacClaude --diagnostics
 ```
 
-## Building and distribution
+## Building
 
-See the [README](../README.md#build) for local builds and [signing and notarization](NOTARIZATION.md) for release instructions and download verification.
+See the [README](../README.md#build) to build locally and [NOTARIZATION.md](NOTARIZATION.md) for signing and release.
