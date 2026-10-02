@@ -19,7 +19,10 @@ final class SharedSessionStoreTests: XCTestCase {
         let f = try XCTUnwrap(fixture)
         try f.addHistory()
         try f.addPools()
-        XCTAssertFalse(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileA))
+        let untouched = try files(in: root)
+        XCTAssertTrue(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileA))
+        XCTAssertFalse(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+        XCTAssertEqual(try files(in: root), untouched)
         _ = try f.store.activate(profileDirectories: f.profiles, destination: f.profileB)
         let before = try files(in: root)
         let ownerInode = try inode(f.b)
@@ -357,9 +360,10 @@ final class SharedSessionStoreTests: XCTestCase {
         }
     }
 
-    func testChangedDestinationAfterJournalIsPreservedAndRecoveryRefuses() throws {
+    func testChangedDestinationBeforeAnyMoveClearsJournalAndKeepsBothHistories() throws {
         let f = try XCTUnwrap(fixture)
         try f.addHistory()
+        try f.addPools()
         let interrupted = SharedSessionStore(rootDirectory: f.state) { point in
             if point == .backupWritten { throw TestError.interrupted }
         }
@@ -367,10 +371,57 @@ final class SharedSessionStoreTests: XCTestCase {
         let unexpected = Data("{\"title\":\"Created by an external app\"}".utf8)
         try unexpected.write(to: f.record(in: f.b))
         XCTAssertThrowsError(try f.store.recover(profileDirectories: f.profiles))
-        XCTAssertTrue(try f.store.hasPendingTransaction())
+        XCTAssertFalse(try f.store.hasPendingTransaction())
         XCTAssertEqual(try Data(contentsOf: f.record(in: f.b)), unexpected)
         XCTAssertEqual(try Data(contentsOf: f.record(in: f.a)), f.recordData)
+        XCTAssertEqual(try Data(contentsOf: f.pool(in: f.profileA)), f.fullPool)
+        XCTAssertEqual(try Data(contentsOf: f.pool(in: f.profileB)), f.emptyPool)
         try assertSchedules(f)
+        XCTAssertThrowsError(try f.store.inspect(profileDirectories: f.profiles)) { error in
+            guard case SharedSessionStoreError.multipleHistories = error else { return XCTFail("\(error)") }
+        }
+    }
+
+    func testDestinationGainingHistoryRefusesBeforeWorktreePoolsMove() throws {
+        let f = try XCTUnwrap(fixture)
+        try f.addHistory()
+        try f.addPools()
+        let unexpected = Data("{\"title\":\"Created during the switch\"}".utf8)
+        let racing = SharedSessionStore(rootDirectory: f.state) { point in
+            if point == .journalWritten { try unexpected.write(to: f.record(in: f.b)) }
+        }
+        XCTAssertThrowsError(try racing.activate(profileDirectories: f.profiles, destination: f.profileB))
+        XCTAssertFalse(try f.store.hasPendingTransaction())
+        XCTAssertEqual(try Data(contentsOf: f.pool(in: f.profileA)), f.fullPool)
+        XCTAssertEqual(try Data(contentsOf: f.pool(in: f.profileB)), f.emptyPool)
+        XCTAssertEqual(try Data(contentsOf: f.record(in: f.a)), f.recordData)
+        try assertSchedules(f)
+    }
+
+    func testRecoveryRefusesSourceImportStartedAfterInterruption() throws {
+        let f = try XCTUnwrap(fixture)
+        try f.addHistory()
+        let interrupted = SharedSessionStore(rootDirectory: f.state) { point in
+            if point == .backupWritten { throw TestError.interrupted }
+        }
+        XCTAssertThrowsError(try interrupted.activate(profileDirectories: f.profiles, destination: f.profileB))
+        let staged = Data("{\"stagedTranscriptPath\":\"/tmp/pending.jsonl\"}".utf8)
+        try staged.write(to: f.record(in: f.a))
+        XCTAssertThrowsError(try f.store.recover(profileDirectories: f.profiles)) { error in
+            guard case SharedSessionStoreError.pendingImport = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertFalse(try f.store.hasPendingTransaction())
+        XCTAssertEqual(try Data(contentsOf: f.record(in: f.a)), staged)
+        XCTAssertFalse(manager.fileExists(atPath: f.record(in: f.b).path))
+    }
+
+    func testActivatingCurrentOwnerRecordsItForLaterReopen() throws {
+        let f = try XCTUnwrap(fixture)
+        try f.addHistory()
+        XCTAssertFalse(try f.store.activate(profileDirectories: f.profiles, destination: f.profileA).didMove)
+        try FileManager.default.removeItem(at: f.record(in: f.a))
+        XCTAssertTrue(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileA))
+        XCTAssertFalse(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
     }
 
     func testVerifierPreventsMutationAndPreservesJournalDuringRecovery() throws {

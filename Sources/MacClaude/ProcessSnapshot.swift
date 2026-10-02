@@ -120,7 +120,7 @@ struct ProcessSnapshot {
         var ancestor = executable.deletingLastPathComponent()
         while ancestor.path != "/" {
             if ancestor.pathExtension == "app",
-               Bundle(url: ancestor)?.bundleIdentifier == "com.anthropic.claudefordesktop" {
+               Bundle(url: ancestor)?.bundleIdentifier == ClaudeInstallation.bundleIdentifier {
                 return true
             }
             ancestor.deleteLastPathComponent()

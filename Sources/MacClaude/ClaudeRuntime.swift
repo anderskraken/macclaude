@@ -108,7 +108,7 @@ final class ClaudeRuntime {
             if pendingProfileID == nil { phase = nil }
         }
         launchHasTimedOut = false
-        phase = .verifying
+        phase = .checkingSessions
         let running = instances()
         guard running.allSatisfy({ instance in profiles.contains { instance.profile.matches(profile: $0, paths: paths) } }) else {
             throw RuntimeError.unreadableInstances

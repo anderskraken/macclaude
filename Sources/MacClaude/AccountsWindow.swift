@@ -1,6 +1,6 @@
 import AppKit
 
-struct AccountRowState: Sendable {
+struct AccountRowState: Sendable, Equatable {
     let id: String
     let name: String
     let isDefault: Bool
@@ -54,6 +54,7 @@ final class AccountsWindowController: NSWindowController {
     private let addButton = ActionButton(title: "Add Account…", symbol: "plus")
     private let sharedButton = ActionButton(title: "Shared Files", symbol: "folder")
     private let settingsButton = MenuButton(symbol: "ellipsis.circle", accessibilityLabel: "More options")
+    private var renderedCards: (accounts: [AccountRowState], isBusy: Bool)?
 
     init(onAction: @escaping (AccountsAction) -> Void) {
         self.onAction = onAction
@@ -63,8 +64,7 @@ final class AccountsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "MacClaude — Account Switcher"
-        window.subtitle = "Your accounts. One workspace."
+        window.title = "MacClaude"
         window.minSize = NSSize(width: 520, height: 480)
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("MacClaudeAccountsWindow")
@@ -82,22 +82,10 @@ final class AccountsWindowController: NSWindowController {
     }
 
     func render(_ state: AccountsViewState) {
-        for view in rows.arrangedSubviews {
-            rows.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        for (index, account) in state.accounts.enumerated() {
-            let row = AccountCard(account: account, index: index, isBusy: state.isBusy, onAction: onAction)
-            rows.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        }
-        if state.accounts.isEmpty {
-            let empty = NSTextField(wrappingLabelWithString: "Add an account to get started. You’ll sign in securely inside Claude.")
-            empty.textColor = .secondaryLabelColor
-            empty.alignment = .center
-            empty.font = .systemFont(ofSize: 13)
-            rows.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        // Rebuilding cards drops keyboard focus, so only rebuild when a card would change.
+        if renderedCards?.accounts != state.accounts || renderedCards?.isBusy != state.isBusy {
+            renderedCards = (state.accounts, state.isBusy)
+            renderCards(state)
         }
         if let path = state.claudePath {
             applicationLabel.stringValue = state.claudeVersion.map { "Claude \($0)" } ?? "Claude is ready"
@@ -116,28 +104,38 @@ final class AccountsWindowController: NSWindowController {
             if let action = state.noticeAction { self?.onAction(action.action) }
         }
         addButton.isEnabled = !state.isBusy && state.canAdd
-        addButton.toolTip = state.canAdd ? "Add an account (⌘N)" : "Adding accounts is paused until this Claude version is checked."
+        addButton.toolTip = state.canAdd ? "Add an account (⌘N)" : "Adding accounts isn’t available on this Claude version yet."
         sharedButton.isEnabled = !state.isBusy
         settingsButton.isEnabled = !state.isBusy
-        if let window { window.recalculateKeyViewLoop() }
+    }
+
+    private func renderCards(_ state: AccountsViewState) {
+        for view in rows.arrangedSubviews {
+            rows.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for (index, account) in state.accounts.enumerated() {
+            let row = AccountCard(account: account, index: index, isBusy: state.isBusy, onAction: onAction)
+            rows.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+        if state.accounts.isEmpty {
+            let empty = NSTextField(wrappingLabelWithString: "Add an account to get started.")
+            empty.textColor = .secondaryLabelColor
+            empty.alignment = .center
+            empty.font = .systemFont(ofSize: 13)
+            rows.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+        window?.recalculateKeyViewLoop()
     }
 
     private func buildInterface(in window: NSWindow) {
-        let content = WindowBackgroundView()
+        let content = NSView()
         window.contentView = content
 
         let heading = NSTextField(labelWithString: "Accounts")
         heading.font = .systemFont(ofSize: 27, weight: .bold)
-        let detail = NSTextField(wrappingLabelWithString: "Keep the same Claude Code sessions, skills, and memory across accounts.")
-        detail.font = .systemFont(ofSize: 13)
-        detail.textColor = .secondaryLabelColor
-        detail.maximumNumberOfLines = 0
-
-        let headerText = NSStackView(views: [heading, detail])
-        headerText.orientation = .vertical
-        headerText.alignment = .leading
-        headerText.spacing = 7
-        detail.widthAnchor.constraint(equalTo: headerText.widthAnchor).isActive = true
         settingsButton.items = [
             ActionMenuItem("Choose Claude App…") { [weak self] in self?.onAction(.chooseClaude) },
             ActionMenuItem("Copy Diagnostics", symbol: "doc.on.doc") { [weak self] in self?.onAction(.copyDiagnostics) },
@@ -145,10 +143,10 @@ final class AccountsWindowController: NSWindowController {
             .separator(),
             ActionMenuItem("How MacClaude Works", symbol: "questionmark.circle") { [weak self] in self?.onAction(.help) }
         ]
-        let header = NSStackView(views: [headerText, settingsButton])
+        let header = NSStackView(views: [heading, settingsButton])
         header.orientation = .horizontal
         header.distribution = .fill
-        header.alignment = .top
+        header.alignment = .centerY
         header.spacing = 18
         settingsButton.setContentHuggingPriority(.required, for: .horizontal)
         settingsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -207,7 +205,6 @@ final class AccountsWindowController: NSWindowController {
         addButton.handler = { [weak self] in self?.onAction(.add) }
         addButton.keyEquivalent = "n"
         addButton.keyEquivalentModifierMask = .command
-        addButton.toolTip = "Add an account (⌘N)"
         sharedButton.handler = { [weak self] in self?.onAction(.revealSharedFolder) }
         sharedButton.toolTip = "Open shared Claude Code files in Finder"
         let spacer = NSView()
@@ -220,21 +217,15 @@ final class AccountsWindowController: NSWindowController {
         addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         sharedButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let explanation = NSTextField(wrappingLabelWithString: "Open uses the sessions already in that account. Switch moves the shared Code sessions and restarts Claude. Sign-ins and cloud chats stay with their account.")
-        explanation.font = .systemFont(ofSize: 11)
-        explanation.textColor = .secondaryLabelColor
-        explanation.maximumNumberOfLines = 0
         applicationLabel.font = .systemFont(ofSize: 10)
         applicationLabel.textColor = .tertiaryLabelColor
         applicationLabel.lineBreakMode = .byTruncatingMiddle
 
-        let footer = NSStackView(views: [buttonBar, explanation, applicationLabel])
+        let footer = NSStackView(views: [buttonBar, applicationLabel])
         footer.orientation = .vertical
         footer.alignment = .leading
         footer.spacing = 11
-        footer.setCustomSpacing(6, after: explanation)
         buttonBar.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
-        explanation.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
         applicationLabel.widthAnchor.constraint(lessThanOrEqualTo: footer.widthAnchor).isActive = true
 
         let separator = NSBox()
@@ -277,8 +268,8 @@ private final class AccountCard: NSView {
         title.toolTip = account.name
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let subtitle = NSTextField(labelWithString: account.holdsSessions ? "Sessions here" : (account.isDefault ? "Original sign-in" : "Separate sign-in"))
-        subtitle.toolTip = subtitle.stringValue
+        let subtitle = NSTextField(labelWithString: "Sessions here")
+        subtitle.isHidden = !account.holdsSessions
         subtitle.font = .systemFont(ofSize: 11)
         subtitle.textColor = .secondaryLabelColor
         subtitle.lineBreakMode = .byTruncatingTail
@@ -466,17 +457,4 @@ private final class ActionMenuItem: NSMenuItem {
 @MainActor
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
-}
-
-@MainActor
-private final class WindowBackgroundView: NSView {
-    override var isOpaque: Bool { true }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
-    }
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
-    }
 }

@@ -3,42 +3,51 @@
 <img src="docs/images/macclaude-icon.png" width="128" alt="MacClaude icon">
 
 [![Build and test](https://github.com/anderskraken/macclaude/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/anderskraken/macclaude/actions/workflows/build.yml)
-[![Preview v0.2.5](https://img.shields.io/badge/preview-v0.2.5-blue)](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5)
-[![macOS 14+ · Apple Silicon](https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-black)](#download)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A tiny native Mac menu bar app for switching Claude Desktop accounts while keeping the same local Claude Code sessions, skills and memory. Swift and AppKit. No package dependencies or background polling.
+A menu bar app for people with more than one Claude account. It switches Claude Desktop between accounts and brings your local Claude Code sessions along, so the Code sidebar doesn't go empty every time you change login.
 
 ## Download
 
-**[Download MacClaude for Apple Silicon](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/MacClaude.zip)** · [Release notes](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5) · [SHA-256 checksum](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/SHA256SUMS.txt)
+[Download MacClaude 0.2.5 for Apple Silicon](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/MacClaude.zip) ([release notes](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5), [SHA-256](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/SHA256SUMS.txt))
 
-Requires **macOS 14+**. Account-to-account transfers support **Claude Desktop 2.9939.4**; reopening the account already holding your sessions also works with **2.16120.0**. Transfers on newer versions remain paused pending compatibility review. This is an unofficial preview. Intel binaries are not included.
+You need macOS 14 or later on Apple Silicon. This is an unofficial preview.
 
-Unzip, move **MacClaude.app** to Applications, and open it. **Sessions here** shows where your shared history lives; **Running** shows which account is open. Your existing Claude login is available immediately. To add another account, choose **Add Account**, sign in and open Claude’s **Code** tab, then select that account again in MacClaude.
+Switching and adding accounts only work with Claude Desktop 2.9939.4, the version I tested them on. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
 
-## Trust and verification
+## Getting started
 
-- **Signed by Snega AS** (Apple team `P5VRX5EBV4`), notarized by Apple, with a stapled ticket. [Verify your download](docs/NOTARIZATION.md#verify-a-download).
-- **Credentials stay with Claude.** MacClaude does not read login credentials, send telemetry, or make network requests. Claude handles authentication and its own network traffic.
-- **Testable locally.** Automated tests use temporary fixtures. Native session sharing was validated on Claude 2.9939.4. [Coverage and remaining limits](docs/TESTING.md).
-- **Source available under MIT.** Inspect the [switching implementation](Sources/MacClaudeCore/SharedSessionStore.swift), [build workflow](.github/workflows/build.yml), and [release script](scripts/notarize.sh).
+Move MacClaude.app to Applications and open it. Your current Claude login is already there as the first account.
+
+To add another account, choose **Add Account**, sign in in the Claude window that opens, and open the Code tab. Then pick the new account in MacClaude once more to bring your sessions over.
+
+In the menu, **Running** marks the account Claude has open. **Sessions here** marks the account that holds your session history right now.
 
 ## How it works
 
-Switching gracefully quits Claude, moves the **same session directory and worktree registry** into the selected account’s profile, and opens Claude’s Code tab. There are no routine session copies, imports or synchronization. **One Claude account runs at a time**; finish active work and switch through MacClaude.
+Each extra account gets its own Claude profile folder. When you switch, MacClaude quits Claude, moves the Code session folder and the worktree list into the other account's profile, and opens Claude there. It moves the folder instead of copying it, so there is only ever one history.
 
-Sharing history does not guarantee identical reasoning context after an account or model change. [Continuity limits](docs/USAGE.md#session-history-and-reasoning-continuity).
+Your Code sessions, worktrees and everything in `~/.claude` (skills, memory, CLAUDE.md, plugins) follow you. Each account keeps its own login, cloud chats, projects, Desktop settings and scheduled tasks.
 
-Accounts and the menu bar show **percent used** and the age of Claude’s recorded usage. Switching shows each step as it happens. **Copy Diagnostics** produces a local report without account names, private paths, credentials or conversations.
+Only one account runs at a time, and you should always switch through MacClaude. If you open another profile yourself, Claude starts a second history there, and MacClaude won't merge the two.
 
-Project files and Claude Code’s usual shared configuration stay in place. Logins, cloud chats, Desktop preferences and schedules remain account-specific. An initial metadata backup and recovery journal support interrupted transfers; they do not back up transcripts or repositories. Back up your Claude and MacClaude profile directories before first use. Independently populated histories are refused rather than merged.
+The menu also shows how much of your 5-hour and weekly limits you've used, from Claude's last local reading.
 
-[After a reboot or update](docs/USAGE.md#after-a-reboot-or-claude-update) · [Usage and recovery](docs/USAGE.md) · [Architecture](docs/ARCHITECTURE.md) · [Report an issue](https://github.com/anderskraken/macclaude/issues)
+Back up your Claude and MacClaude profile folders before the first switch. MacClaude keeps a copy of the session metadata and a journal to recover an interrupted switch, but it does not back up transcripts or repositories.
+
+After a reboot or a Claude update, macOS may reopen Claude on your original account with an empty Code sidebar. Your sessions are still there. Quit Claude and open the right account from MacClaude.
+
+More detail: [usage and recovery](docs/USAGE.md), [architecture](docs/ARCHITECTURE.md), [testing and known limits](docs/TESTING.md).
+
+## Privacy and signing
+
+MacClaude doesn't read your credentials, send telemetry or make network requests. Claude handles sign-in on its own.
+
+Releases are signed by Snega AS (Apple team `P5VRX5EBV4`) and notarized by Apple. See [how to verify a download](docs/NOTARIZATION.md#verify-a-download). The switching code is in [SharedSessionStore.swift](Sources/MacClaudeCore/SharedSessionStore.swift) if you want to read it before trusting it with your sessions.
 
 ## Build
 
-Requires macOS 14+ and Xcode with Swift 6. Select Xcode in **Settings → Locations → Command Line Tools**, then:
+You need Xcode with Swift 6. Select it under **Settings → Locations → Command Line Tools**, then:
 
 ```sh
 git clone https://github.com/anderskraken/macclaude.git
@@ -48,10 +57,10 @@ make build
 open build/MacClaude.app
 ```
 
-Local builds are ad-hoc signed. [Developer ID signing and notarization](docs/NOTARIZATION.md) require your own Apple credentials.
+Local builds are ad-hoc signed. To sign and notarize your own builds, see [NOTARIZATION.md](docs/NOTARIZATION.md).
 
 ## Contributing
 
-Bug reports, documentation fixes and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the source map and compatibility testing. Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, where things live in the source, and how to test against a new Claude version. Report security issues privately, as described in [SECURITY.md](SECURITY.md).
 
-MacClaude is independent software and is not affiliated with Anthropic.
+MacClaude is not affiliated with Anthropic.

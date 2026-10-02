@@ -93,9 +93,10 @@ public struct SharedSessionStore: Sendable {
     /// Claude version's transfer format to be approved. Fail closed if ownership
     /// changed or a transaction still needs recovery. This check never writes.
     public func canReopenWithoutTransfer(profileDirectories: [URL], destination: URL) throws -> Bool {
-        guard try !hasPendingTransaction(), try kind(at: activeURL) != nil else { return false }
-        let active: ActiveStore = try readJSON(ActiveStore.self, from: activeURL)
-        guard active.version == 1 else { throw SharedSessionStoreError.changed }
+        guard try !hasPendingTransaction() else { return false }
+        guard let active = try readActive() else {
+            return try soleHistoryProfile(profileDirectories) == destination.standardizedFileURL
+        }
         guard active.namespace.profile == destination.standardizedFileURL else { return false }
         let scan = try scanProfiles(profileDirectories)
         guard let owner = scan.namespaces.first(where: { $0.descriptor == active.namespace }),
@@ -125,6 +126,10 @@ public struct SharedSessionStore: Sendable {
             return SharedSessionActivation(didMove: false, destinationNeedsSetup: true, backupDirectory: nil)
         }
         if source.directory == target.directory {
+            if try readActive() == nil {
+                try createPrivateDirectory(stateDirectory)
+                try writeJSON(ActiveStore(version: 1, namespace: target.descriptor, identity: target.identity), to: activeURL)
+            }
             return SharedSessionActivation(didMove: false, destinationNeedsSetup: false, backupDirectory: try existingBackup())
         }
         try createPrivateDirectory(stateDirectory)
@@ -170,7 +175,6 @@ public struct SharedSessionStore: Sendable {
     }
 
     private func finish(_ journal: inout Journal) throws {
-        try validateJournal(journal, allowedProfiles: journal.namespaces.map(\.profile))
         try createPrivateDirectory(stateDirectory.appendingPathComponent("Transactions", isDirectory: true))
         let stage = transactionDirectory(journal.id)
         try createPrivateDirectory(stage)
@@ -215,15 +219,23 @@ public struct SharedSessionStore: Sendable {
         if try readReceipt() == nil {
             try writeJSON(BackupReceipt(version: 1, backupID: journal.backupID), to: receiptURL)
         }
+
+        if try identity(parkedDestination) == nil {
+            do {
+                let current = try inspectNamespace(journal.source)
+                let target = try inspectNamespace(journal.destination)
+                guard current.identity == journal.sourceIdentity, !target.hasHistory,
+                      target.identity == journal.destinationIdentity,
+                      target.scheduleIdentity == journal.destinationSchedule else { throw SharedSessionStoreError.changed }
+            } catch {
+                if try nothingMoved(journal, stage: stage) { try unlinkFile(journalURL) }
+                throw error
+            }
+        }
         try transferWorktreePool(journal, stage: stage)
 
         // Each operation recognizes its completed state by inode, so a crash
         // between a rename and the next journal write can be recovered safely.
-        if try identity(parkedDestination) == nil {
-            let target = try inspectNamespace(journal.destination)
-            guard !target.hasHistory, target.identity == journal.destinationIdentity,
-                  target.scheduleIdentity == journal.destinationSchedule else { throw SharedSessionStoreError.changed }
-        }
         try move(journal.destinationIdentity, from: destination, to: parkedDestination)
         try checkpoint(.destinationParked)
         if let schedule = journal.sourceSchedule {
@@ -370,10 +382,8 @@ public struct SharedSessionStore: Sendable {
         let histories = namespaces.filter { $0.hasHistory || $0.pool.hasData }
         guard histories.count <= 1 else { throw SharedSessionStoreError.multipleHistories }
         if let history = histories.first { return history }
-        if try kind(at: activeURL) != nil {
-            let active: ActiveStore = try readJSON(ActiveStore.self, from: activeURL)
-            guard active.version == 1,
-                  let selected = namespaces.first(where: { $0.descriptor == active.namespace }),
+        if let active = try readActive() {
+            guard let selected = namespaces.first(where: { $0.descriptor == active.namespace }),
                   selected.identity == active.identity else { throw SharedSessionStoreError.changed }
             return selected
         }
@@ -430,6 +440,15 @@ public struct SharedSessionStore: Sendable {
         return WorktreePool(identity: fileIdentity, hasData: hasData)
     }
 
+    private func nothingMoved(_ journal: Journal, stage: URL) throws -> Bool {
+        try identity(journal.source.directory) == journal.sourceIdentity
+            && identity(journal.destination.directory) == journal.destinationIdentity
+            && identity(poolURL(journal.source.profile)) == journal.sourcePool
+            && identity(poolURL(journal.destination.profile)) == journal.destinationPool
+            && identity(stage.appendingPathComponent("destination", isDirectory: true)) == nil
+            && identity(stage.appendingPathComponent("destination-git-worktrees.json")) == nil
+    }
+
     private func transferWorktreePool(_ journal: Journal, stage: URL) throws {
         let source = poolURL(journal.source.profile)
         let destination = poolURL(journal.destination.profile)
@@ -475,7 +494,7 @@ public struct SharedSessionStore: Sendable {
             let size = (attrs[.size] as? NSNumber)?.int64Value ?? Int64.max
             guard size <= Self.maximumFileBytes else { throw SharedSessionStoreError.unsafe("a Code session file is too large.") }
             bytes += size
-            guard bytes <= Self.maximumTreeBytes, count <= 100_000 else { throw SharedSessionStoreError.unsafe("the Code session folder exceeds the safety bounds.") }
+            guard bytes <= Self.maximumTreeBytes else { throw SharedSessionStoreError.unsafe("the Code session folder exceeds the safety bounds.") }
         } else {
             throw SharedSessionStoreError.unsafe("a session folder contains a symbolic link or special file.")
         }
@@ -664,6 +683,18 @@ public struct SharedSessionStore: Sendable {
         }
         try visit(directory, prefix: "", depth: 0)
         return result.sorted { $0.path < $1.path }
+    }
+
+    private func soleHistoryProfile(_ profileDirectories: [URL]) throws -> URL? {
+        let histories = try scanProfiles(profileDirectories).namespaces.filter { $0.hasHistory || $0.pool.hasData }
+        return histories.count == 1 ? histories[0].profile : nil
+    }
+
+    private func readActive() throws -> ActiveStore? {
+        guard try kind(at: activeURL) != nil else { return nil }
+        let active = try readJSON(ActiveStore.self, from: activeURL)
+        guard active.version == 1 else { throw SharedSessionStoreError.changed }
+        return active
     }
 
     private func existingBackup() throws -> URL? { try readReceipt().map { backupDirectory($0.backupID) } }

@@ -95,6 +95,20 @@ struct DiagnosticsReport {
     }
 }
 
+extension DiagnosticsReport {
+    init(claudeVersion: String?, profiles: [AccountProfile], instances: [ClaudeInstance], paths: ProfilePaths,
+         location: SessionLocation, phase: SwitchPhase?, pendingID: String?, launchTimedOut: Bool, lastFailure: DiagnosticFailure?) {
+        self.init(
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            claudeVersion: claudeVersion, profiles: profiles,
+            runningIDs: Set(profiles.filter { profile in instances.contains { $0.profile.matches(profile: profile, paths: paths) } }.map(\.id)),
+            unidentifiedProcesses: instances.filter { instance in !profiles.contains { instance.profile.matches(profile: $0, paths: paths) } }.count,
+            location: location, transfersSupported: claudeVersion == AccountAvailability.checkedClaudeVersion,
+            phase: phase, pendingID: pendingID, launchTimedOut: launchTimedOut, lastFailure: lastFailure)
+    }
+}
+
 struct DiagnosticFailure {
     let code: String
     init(_ error: Error) { code = DiagnosticsReport.failureCode(error) }
