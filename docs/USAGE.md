@@ -2,7 +2,7 @@
 
 ## Set up
 
-Download the ZIP from the [release page](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5), unzip it, and move **MacClaude.app** to Applications before you open it or turn on Launch at Login.
+Download the ZIP from the [release page](https://github.com/anderskraken/macclaude/releases/tag/v0.2.6), unzip it, and move **MacClaude.app** to Applications before you open it or turn on Launch at Login.
 
 1. Your existing Claude login appears as the first account, named **Personal**. You can rename it.
 2. Choose **Add Account…** and enter a name. Claude quits and opens a new sign-in window. Sign in and open the Code tab.

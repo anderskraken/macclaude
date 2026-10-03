@@ -2,7 +2,7 @@
 
 ## Verify a download
 
-Download `MacClaude.zip` and `SHA256SUMS.txt` from the [same release](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5). In their download directory, check the archive before extracting it:
+Download `MacClaude.zip` and `SHA256SUMS.txt` from the [same release](https://github.com/anderskraken/macclaude/releases/tag/v0.2.6). In their download directory, check the archive before extracting it:
 
 ```sh
 shasum -a 256 -c SHA256SUMS.txt

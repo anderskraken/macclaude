@@ -19,11 +19,13 @@ final class AccountAvailabilityTests: XCTestCase {
     }
 
     func testCheckedVersionOpensAnyAccountWithoutBanner() {
-        let state = availability(checked, .ready(ownerID: "second", canReopen: true))
-        XCTAssertTrue(state.canOpen(one))
-        XCTAssertTrue(state.canOpen(two))
-        XCTAssertNil(state.banner.text)
-        XCTAssertNil(state.blockedReason)
+        for version in AccountAvailability.checkedClaudeVersions {
+            let state = availability(version, .ready(ownerID: "second", canReopen: true))
+            XCTAssertTrue(state.canOpen(one))
+            XCTAssertTrue(state.canOpen(two))
+            XCTAssertNil(state.banner.text)
+            XCTAssertNil(state.blockedReason)
+        }
     }
 
     func testUncheckedVersionOnlyReopensVerifiedOwner() {
