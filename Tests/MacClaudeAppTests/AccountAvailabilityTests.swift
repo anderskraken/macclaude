@@ -5,7 +5,7 @@ import MacClaudeCore
 final class AccountAvailabilityTests: XCTestCase {
     private let one = AccountProfile(id: "default", name: "One", createdAt: Date())
     private let two = AccountProfile(id: "second", name: "Two", createdAt: Date())
-    private let checked = AccountAvailability.checkedClaudeVersion
+    private let checked = "2.9939.4"
 
     private func availability(_ version: String?, _ location: SessionLocation) -> AccountAvailability {
         AccountAvailability(claudeVersion: version, location: location, profiles: [one, two])
@@ -19,11 +19,13 @@ final class AccountAvailabilityTests: XCTestCase {
     }
 
     func testCheckedVersionOpensAnyAccountWithoutBanner() {
-        let state = availability(checked, .ready(ownerID: "second", canReopen: true))
-        XCTAssertTrue(state.canOpen(one))
-        XCTAssertTrue(state.canOpen(two))
-        XCTAssertNil(state.banner.text)
-        XCTAssertNil(state.blockedReason)
+        for version in AccountAvailability.checkedClaudeVersions {
+            let state = availability(version, .ready(ownerID: "second", canReopen: true))
+            XCTAssertTrue(state.canOpen(one))
+            XCTAssertTrue(state.canOpen(two))
+            XCTAssertNil(state.banner.text)
+            XCTAssertNil(state.blockedReason)
+        }
     }
 
     func testUncheckedVersionOnlyReopensVerifiedOwner() {

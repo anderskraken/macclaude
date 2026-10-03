@@ -9,11 +9,11 @@ A menu bar app for people with more than one Claude account. It switches Claude 
 
 ## Download
 
-[Download MacClaude 0.2.5 for Apple Silicon](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/MacClaude.zip) ([release notes](https://github.com/anderskraken/macclaude/releases/tag/v0.2.5), [SHA-256](https://github.com/anderskraken/macclaude/releases/download/v0.2.5/SHA256SUMS.txt))
+[Download MacClaude 0.2.6 for Apple Silicon](https://github.com/anderskraken/macclaude/releases/download/v0.2.6/MacClaude.zip) ([release notes](https://github.com/anderskraken/macclaude/releases/tag/v0.2.6), [SHA-256](https://github.com/anderskraken/macclaude/releases/download/v0.2.6/SHA256SUMS.txt))
 
 You need macOS 14 or later on Apple Silicon. This is an unofficial preview.
 
-Switching and adding accounts only work with Claude Desktop 2.9939.4, the version I tested them on. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
+Switching and adding accounts work with Claude Desktop 2.9939.4 and 2.19675.0, the versions tested so far. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
 
 ## Getting started
 

@@ -569,7 +569,12 @@ public struct SharedSessionStore: Sendable {
         }
         var status = stat()
         guard fstatat(AT_FDCWD, url.path, &status, AT_SYMLINK_NOFOLLOW) == 0 else { throw posixError(url) }
-        return Identity(device: UInt64(UInt32(bitPattern: status.st_dev)), inode: UInt64(status.st_ino), directory: type == .typeDirectory)
+        guard let volumeUUID = try url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
+              let uuid = UUID(uuidString: volumeUUID) else {
+            throw SharedSessionStoreError.unsafe("the disk's persistent identity could not be verified.")
+        }
+        return Identity(device: UInt64(UInt32(bitPattern: status.st_dev)), inode: UInt64(status.st_ino),
+                        directory: type == .typeDirectory, volumeUUID: uuid)
     }
 
     private func requiredIdentity(_ url: URL, directory: Bool) throws -> Identity {
@@ -730,7 +735,22 @@ public struct SharedSessionStore: Sendable {
         try synchronizeDirectory(directory.deletingLastPathComponent())
     }
 
-    private struct Identity: Codable, Equatable { let device: UInt64; let inode: UInt64; let directory: Bool }
+    private struct Identity: Codable, Equatable {
+        // st_dev identifies a mount, and can change after reboot. Persist the
+        // volume UUID alongside the inode so ownership and recovery survive it.
+        // Old records lack the UUID: retain their strict device check rather
+        // than automatically trusting an inode on an unverified volume.
+        let device: UInt64
+        let inode: UInt64
+        let directory: Bool
+        let volumeUUID: UUID?
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            guard lhs.inode == rhs.inode, lhs.directory == rhs.directory else { return false }
+            if let left = lhs.volumeUUID, let right = rhs.volumeUUID { return left == right }
+            return lhs.device == rhs.device
+        }
+    }
     private struct NamespaceDescriptor: Codable, Equatable {
         let profile: URL
         let account: String
