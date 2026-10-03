@@ -1,6 +1,8 @@
 # Architecture
 
-MacClaude is a Swift 6/AppKit menu bar app. It uses one unmodified Claude installation and separate Electron profiles for account logins. The shared-store integration is based on inspection and native testing of **Claude Desktop 2.9939.4**, not a supported Anthropic API. Transfers on other versions are blocked. Reopening the recorded owner is permitted after checking its directory identity, the absence of a pending transaction, and the existing storage layout; it never calls transfer or recovery.
+MacClaude is a Swift 6/AppKit menu bar app. It uses one unmodified Claude installation and separate Electron profiles for account logins. The shared-store integration is based on inspection and native testing of **Claude Desktop 2.9939.4 and 2.19675.0**, not a supported Anthropic API. Transfers on other versions are blocked. Reopening the recorded owner is permitted after checking its directory identity, the absence of a pending transaction, and the existing storage layout; it never calls transfer or recovery.
+
+Persisted folder and file identities use the volume UUID and inode. The mount device number is retained for same-volume transfer checks and for compatibility with older records, but does not determine ownership when both identities include a volume UUID: macOS can assign a different device number after a reboot. Legacy records without a volume UUID still require their original device number to match; a mismatch needs a verified metadata repair rather than automatic adoption by inode alone.
 
 ## One store, one active account
 

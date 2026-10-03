@@ -104,7 +104,7 @@ extension DiagnosticsReport {
             claudeVersion: claudeVersion, profiles: profiles,
             runningIDs: Set(profiles.filter { profile in instances.contains { $0.profile.matches(profile: profile, paths: paths) } }.map(\.id)),
             unidentifiedProcesses: instances.filter { instance in !profiles.contains { instance.profile.matches(profile: $0, paths: paths) } }.count,
-            location: location, transfersSupported: claudeVersion == AccountAvailability.checkedClaudeVersion,
+            location: location, transfersSupported: AccountAvailability.supportsTransfers(version: claudeVersion),
             phase: phase, pendingID: pendingID, launchTimedOut: launchTimedOut, lastFailure: lastFailure)
     }
 }

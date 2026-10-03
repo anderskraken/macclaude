@@ -13,7 +13,7 @@ A menu bar app for people with more than one Claude account. It switches Claude 
 
 You need macOS 14 or later on Apple Silicon. This is an unofficial preview.
 
-Switching and adding accounts only work with Claude Desktop 2.9939.4, the version I tested them on. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
+Switching and adding accounts work with Claude Desktop 2.9939.4 and 2.19675.0, the versions tested so far. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
 
 ## Getting started
 

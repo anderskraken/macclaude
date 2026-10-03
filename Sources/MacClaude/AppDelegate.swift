@@ -307,7 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 sessionLocation = initial
                 if case let .unavailable(error) = initial { throw error }
                 let reuse = initial.ownerID == profile.id
-                if installation.version != AccountAvailability.checkedClaudeVersion {
+                if !AccountAvailability.supportsTransfers(version: installation.version) {
                     let canReopen = try await Task.detached {
                         try SharedSessionStore(rootDirectory: sharedRoot)
                             .canReopenWithoutTransfer(profileDirectories: directories, destination: target)
@@ -318,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                        installation: installation, reuseRunning: reuse) {
                     let codeConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
                     let installationURL = installation.url
-                    if installation.version != AccountAvailability.checkedClaudeVersion {
+                    if !AccountAvailability.supportsTransfers(version: installation.version) {
                         // After a reboot/update, reopen the existing owner without
                         // calling either recovery or activation. Recheck ownership
                         // after shutdown; an earlier inspection is not authority to move.
@@ -336,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         let shared = SharedSessionStore(rootDirectory: sharedRoot)
                         let verify: @Sendable () throws -> Void = {
                             let currentVersion = try ClaudeInstallation(url: installationURL).version
-                            guard currentVersion == AccountAvailability.checkedClaudeVersion else {
+                            guard AccountAvailability.supportsTransfers(version: currentVersion) else {
                                 throw SharedCompatibilityError(version: currentVersion)
                             }
                             try ProcessSnapshot.verifyClaudeStopped(installationURL: installationURL)
@@ -587,6 +587,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 struct SharedCompatibilityError: LocalizedError {
     let version: String
     var errorDescription: String? {
-        "Switching isn’t available on Claude \(version) yet. MacClaude has been tested with Claude \(AccountAvailability.checkedClaudeVersion)."
+        "Switching isn’t available on Claude \(version) yet. MacClaude has been tested with Claude \(AccountAvailability.checkedClaudeVersionDescription)."
     }
 }

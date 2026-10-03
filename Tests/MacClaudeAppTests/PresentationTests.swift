@@ -4,6 +4,14 @@ import MacClaudeCore
 @testable import MacClaude
 
 final class PresentationTests: XCTestCase {
+    func testTransferCompatibilityRequiresAnExactReviewedVersion() {
+        XCTAssertTrue(AccountAvailability.supportsTransfers(version: "2.9939.4"))
+        XCTAssertTrue(AccountAvailability.supportsTransfers(version: "2.19675.0"))
+        for version in [nil, "", "2.16120.0", "2.19675", "2.19675.1", "3.0.0"] as [String?] {
+            XCTAssertFalse(AccountAvailability.supportsTransfers(version: version))
+        }
+    }
+
     func testUsageKeepsSourceAgeAndLabelsUtilizationAsUsed() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let fresh = UsagePresentation(.init(observedAt: now.addingTimeInterval(-180), sessionPercent: 20, weeklyPercent: 40), now: now)

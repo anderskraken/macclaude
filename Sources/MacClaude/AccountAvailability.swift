@@ -1,13 +1,17 @@
 import MacClaudeCore
 
 struct AccountAvailability {
-    static let checkedClaudeVersion = "2.9939.4"
+    static let checkedClaudeVersions: Set<String> = ["2.9939.4", "2.19675.0"]
+    static var checkedClaudeVersionDescription: String { checkedClaudeVersions.sorted().joined(separator: " and ") }
+    static func supportsTransfers(version: String?) -> Bool {
+        version.map { checkedClaudeVersions.contains($0) } ?? false
+    }
 
     let claudeVersion: String?
     let location: SessionLocation
     let profiles: [AccountProfile]
 
-    var transfersSupported: Bool { claudeVersion == Self.checkedClaudeVersion }
+    var transfersSupported: Bool { Self.supportsTransfers(version: claudeVersion) }
     var owner: AccountProfile? { profiles.first { $0.id == location.ownerID } }
 
     var blockedReason: String? {

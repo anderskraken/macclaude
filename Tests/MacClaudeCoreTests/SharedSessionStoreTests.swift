@@ -59,6 +59,63 @@ final class SharedSessionStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: f.record(in: f.b)), f.recordData)
     }
 
+    func testRecordedOwnerSurvivesChangedMountDeviceNumberWithoutWriting() throws {
+        let f = try XCTUnwrap(fixture)
+        // An empty store exercises chooseMaster's persisted ownership check too.
+        _ = try f.store.activate(profileDirectories: f.profiles, destination: f.profileB)
+        let activeURL = f.state.appendingPathComponent("active.json")
+        try rewriteIdentities(in: activeURL) { identity in
+            XCTAssertNotNil(identity["volumeUUID"])
+            identity["device"] = 0
+        }
+        let before = try files(in: root)
+        XCTAssertEqual(try f.store.inspect(profileDirectories: f.profiles).activeProfileDirectory, f.profileB)
+        XCTAssertTrue(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+        XCTAssertEqual(try files(in: root), before)
+    }
+
+    func testRecordedOwnerRejectsDifferentVolumeWithSameInodeAndDevice() throws {
+        let f = try XCTUnwrap(fixture)
+        try f.addHistory()
+        _ = try f.store.activate(profileDirectories: f.profiles, destination: f.profileB)
+        try rewriteIdentities(in: f.state.appendingPathComponent("active.json")) { identity in
+            identity["volumeUUID"] = UUID().uuidString
+        }
+        XCTAssertThrowsError(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+        XCTAssertEqual(try Data(contentsOf: f.record(in: f.b)), f.recordData)
+    }
+
+    func testLegacyOwnerRequiresMatchingMountDeviceNumber() throws {
+        let f = try XCTUnwrap(fixture)
+        _ = try f.store.activate(profileDirectories: f.profiles, destination: f.profileB)
+        let activeURL = f.state.appendingPathComponent("active.json")
+        try rewriteIdentities(in: activeURL) { $0.removeValue(forKey: "volumeUUID") }
+        XCTAssertTrue(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+        try rewriteIdentities(in: activeURL) { $0["device"] = 0 }
+        XCTAssertThrowsError(try f.store.inspect(profileDirectories: f.profiles))
+        XCTAssertThrowsError(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+    }
+
+    func testRecoverySurvivesChangedMountDeviceNumberAtEveryBoundary() throws {
+        for point in SharedSessionStore.Checkpoint.allCases where point != .committed {
+            let f = try Fixture(root: root.appendingPathComponent("reboot-\(point.rawValue)", isDirectory: true))
+            try f.addHistory()
+            try f.addPools()
+            let original = try inode(f.a)
+            let interrupted = SharedSessionStore(rootDirectory: f.state) { current in
+                if current == point { throw TestError.interrupted }
+            }
+            XCTAssertThrowsError(try interrupted.activate(profileDirectories: f.profiles, destination: f.profileB))
+            try rewriteIdentities(in: f.state.appendingPathComponent("journal.json")) { $0["device"] = 0 }
+            XCTAssertTrue(try f.store.recover(profileDirectories: f.profiles), point.rawValue)
+            XCTAssertEqual(try inode(f.b), original, point.rawValue)
+            XCTAssertEqual(try Data(contentsOf: f.record(in: f.b)), f.recordData, point.rawValue)
+            XCTAssertEqual(try Data(contentsOf: f.pool(in: f.profileB)), f.fullPool, point.rawValue)
+            try assertSchedules(f)
+            XCTAssertTrue(try f.store.canReopenWithoutTransfer(profileDirectories: f.profiles, destination: f.profileB))
+        }
+    }
+
     func testReopenRejectsIndependentHistoryInOtherAccount() throws {
         let f = try XCTUnwrap(fixture)
         try f.addHistory()
@@ -537,6 +594,20 @@ final class SharedSessionStoreTests: XCTestCase {
         var status = stat()
         guard lstat(url.path, &status) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         return UInt64(status.st_ino)
+    }
+
+    private func rewriteIdentities(in url: URL, edit: (inout [String: Any]) -> Void) throws {
+        func visit(_ value: Any) -> Any {
+            if var object = value as? [String: Any] {
+                if object["inode"] != nil, object["device"] != nil { edit(&object) }
+                else { object = object.mapValues { visit($0) } }
+                return object
+            }
+            if let array = value as? [Any] { return array.map { visit($0) } }
+            return value
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        try JSONSerialization.data(withJSONObject: visit(object), options: [.sortedKeys]).write(to: url)
     }
 
     private func permissions(_ url: URL) throws -> Int {
