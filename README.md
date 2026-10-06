@@ -1,6 +1,6 @@
 # MacClaude
 
-<img src="docs/images/macclaude-icon.png" width="128" alt="MacClaude icon">
+<img src="docs/images/macclaude-banner.png" width="100%" alt="MacClaude — A friendly fox space pilot waves beside the title.">
 
 [![Build and test](https://github.com/anderskraken/macclaude/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/anderskraken/macclaude/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)

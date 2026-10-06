@@ -79,8 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "person.crop.rectangle.stack", accessibilityDescription: "MacClaude accounts")
-        statusItem.button?.image?.isTemplate = true
+        statusItem.button?.image = BrandArtwork.menuBarIcon
+        statusItem.button?.setAccessibilityLabel("MacClaude accounts")
         statusItem.button?.toolTip = "MacClaude — Account Switcher"
         let menu = NSMenu()
         menu.autoenablesItems = false
