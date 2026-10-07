@@ -11,6 +11,8 @@ A menu bar app for people with more than one Claude account. It switches Claude 
 
 [Download MacClaude 0.2.6 for Apple Silicon](https://github.com/anderskraken/macclaude/releases/download/v0.2.6/MacClaude.zip) ([release notes](https://github.com/anderskraken/macclaude/releases/tag/v0.2.6), [SHA-256](https://github.com/anderskraken/macclaude/releases/download/v0.2.6/SHA256SUMS.txt))
 
+The fox pilot artwork shown here is included in the upcoming 0.2.7 release. The 0.2.6 download still uses the previous artwork.
+
 You need macOS 14 or later on Apple Silicon. This is an unofficial preview.
 
 Switching and adding accounts work with Claude Desktop 2.9939.4 and 2.19675.0, the versions tested so far. On any other version MacClaude still opens the account that has your sessions (last tried on 2.16120.0), but it won't move them or add accounts until I've tested that version.
