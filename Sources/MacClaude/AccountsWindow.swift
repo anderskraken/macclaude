@@ -143,11 +143,21 @@ final class AccountsWindowController: NSWindowController {
             .separator(),
             ActionMenuItem("How MacClaude Works", symbol: "questionmark.circle") { [weak self] in self?.onAction(.help) }
         ]
-        let header = NSStackView(views: [heading, settingsButton])
+        let mascot = NSImageView()
+        mascot.image = BrandArtwork.pilot
+        mascot.imageScaling = .scaleProportionallyUpOrDown
+        mascot.setAccessibilityElement(false)
+        mascot.setContentHuggingPriority(.required, for: .horizontal)
+        mascot.setContentCompressionResistancePriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            mascot.widthAnchor.constraint(equalToConstant: 76),
+            mascot.heightAnchor.constraint(equalToConstant: 76)
+        ])
+        let header = NSStackView(views: [mascot, heading, settingsButton])
         header.orientation = .horizontal
         header.distribution = .fill
         header.alignment = .centerY
-        header.spacing = 18
+        header.spacing = 14
         settingsButton.setContentHuggingPriority(.required, for: .horizontal)
         settingsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 

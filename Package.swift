@@ -7,7 +7,7 @@ let package = Package(
     products: [.executable(name: "MacClaude", targets: ["MacClaude"])],
     targets: [
         .target(name: "MacClaudeCore"),
-        .executableTarget(name: "MacClaude", dependencies: ["MacClaudeCore"]),
+        .executableTarget(name: "MacClaude", dependencies: ["MacClaudeCore"], resources: [.process("Resources")]),
         .testTarget(name: "MacClaudeCoreTests", dependencies: ["MacClaudeCore"]),
         .testTarget(name: "MacClaudeAppTests", dependencies: ["MacClaude", "MacClaudeCore"])
     ]

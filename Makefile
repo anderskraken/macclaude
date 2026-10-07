@@ -1,6 +1,8 @@
-.PHONY: build test run dist notarize
+.PHONY: build test run dist notarize brand
 build:
 	bash scripts/build.sh
+brand:
+	bash scripts/export-brand.sh
 test:
 	swift test
 run: build
