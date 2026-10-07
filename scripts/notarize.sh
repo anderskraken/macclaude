@@ -12,6 +12,11 @@ case "$CODESIGN_IDENTITY" in
       exit 1
     } ;;
 esac
+# Check the saved Apple login before spending time building and signing.
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --output-format json > /dev/null; then
+  printf '%s\n' 'Notarization preflight failed. See docs/NOTARIZATION.md#authentication-failures before retrying.' >&2
+  exit 1
+fi
 CONFIGURATION=release bash scripts/build.sh
 signing_details="$(codesign -dv --verbose=4 build/MacClaude.app 2>&1)"
 [[ "$signing_details" == *"Authority=Developer ID Application:"* ]] || {

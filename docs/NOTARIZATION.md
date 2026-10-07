@@ -46,3 +46,21 @@ The script builds a release app with its MIT license, signs with hardened runtim
 No credentials or private signing keys belong in Git. The ordinary CI workflow builds and tests without distribution credentials.
 
 If two installed certificates have the same name, set `CODESIGN_IDENTITY` to the desired certificate’s SHA-1 fingerprint from `security find-identity -v -p codesigning`. The script verifies Developer ID signing before submission. Set `DEVELOPER_TEAM_ID=YOUR_TEAM_ID` to require your signing team.
+
+## Authentication failures
+
+The release script checks the saved notarization login before building. You can run the same read-only check yourself:
+
+```sh
+xcrun notarytool history --keychain-profile "$NOTARY_PROFILE"
+```
+
+HTTP 401 with `Invalid credentials` means Apple rejected the saved login before reviewing the app. Developer ID signing can still succeed because it uses a separate certificate. Apple does not identify whether the password was revoked or the saved account details are incorrect in this response.
+
+For a profile using an Apple Account and app-specific password, verify the account and team, then generate a new app-specific password if needed. [Apple automatically revokes app-specific passwords when the account password is changed or reset](https://support.apple.com/en-us/102654). Refresh the existing profile interactively:
+
+```sh
+xcrun notarytool store-credentials "$NOTARY_PROFILE"
+```
+
+Enter credentials in the local terminal, never in chat or source files. The command validates them before saving. Retry `make notarize` only after the login check succeeds; publish the ZIP only after ticket validation and Gatekeeper acceptance succeed.
